@@ -12,7 +12,7 @@ from app.main import create_app
 from app.modules.agent.llm.fake import ScriptedLlm
 from app.modules.agent.models import AgentRun
 from app.modules.agent.service import AgentService
-from app.modules.auth.seed import BUYER_EMAIL, seed_users
+from app.modules.auth.seed import ADMIN_EMAIL, BUYER_EMAIL, seed_users
 from app.modules.notifications.broadcaster import InMemoryBroadcaster
 from app.modules.notifications.models import Notification
 from app.modules.notifications.service import NotificationService
@@ -64,7 +64,7 @@ async def test_notify_persists_and_publishes(
     assert event["kind"] == "awaiting_approval"
     async with sessionmaker() as s:
         row = (await s.execute(select(Notification))).scalar_one()
-    assert (row.run_id, row.user_id, row.read_at) == ("run1", None, None)
+    assert (row.run_id, row.user_id) == ("run1", None)
 
 
 async def test_run_awaiting_approval_creates_a_notification(
@@ -109,3 +109,11 @@ async def test_list_and_mark_read(sessionmaker: async_sessionmaker[AsyncSession]
         assert read.status_code == 200
         assert read.json()["read_at"] is not None
         assert (await c.post("/notifications/9999/read")).status_code == 404
+        assert (await c.get("/notifications")).json()[0]["read_at"] is not None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            "/auth/login",
+            json={"email": ADMIN_EMAIL, "password": get_settings().auth.seed_admin_password},
+        )
+        # one user reading a broadcast does not mark it read for anyone else
+        assert (await c.get("/notifications")).json()[0]["read_at"] is None

@@ -34,6 +34,7 @@ PURCHASING_TABLES = {
     "llm_calls",
     "users",
     "notifications",
+    "notification_reads",
     "eval_runs",
     "eval_results",
 }

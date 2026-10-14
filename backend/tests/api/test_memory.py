@@ -74,3 +74,12 @@ async def test_lessons_need_a_signed_in_user() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/memory/lessons")
     assert r.status_code == 401
+
+
+async def test_only_buyers_confirm_lessons(lesson_id: int) -> None:
+    app = create_app()
+    app.dependency_overrides[current_user] = lambda: UserOut(
+        id="a", name="n", email="e", role=UserRole.ADMIN, branch="Mumbai"
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.post(f"/memory/lessons/{lesson_id}/confirm")).status_code == 403
