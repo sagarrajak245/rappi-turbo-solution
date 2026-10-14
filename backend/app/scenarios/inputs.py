@@ -16,19 +16,38 @@ DEFAULT_ORDER_CYCLE_DAYS = 7
 OPEN_PO_STATUSES = frozenset({PoStatus.PLACED, PoStatus.CONFIRMED})
 
 
+def _zone_other_load(case: CaseSpec, lead: int) -> Decimal:
+    """Projected volume at our arrival of every other SKU seeded in the same node and zone.
+
+    That is the case's declared neighbours plus other cases' SKUs that happen to share the zone.
+    """
+    zone = s1.PRODUCTS[case.sku].zone
+    stocks: dict[str, int] = {}
+    for n in case.zone_neighbours:
+        stocks[n.sku] = n.on_hand - n.forecast_daily * lead
+    for other in s1.CASES:
+        if other.node != case.node or other.sku == case.sku:
+            continue
+        if s1.PRODUCTS[other.sku].zone != zone:
+            continue
+        inbound = sum(
+            po.qty
+            for po in other.open_pos
+            if po.status in OPEN_PO_STATUSES and 0 <= po.eta_offset <= lead
+        )
+        stocks[other.sku] = other.on_hand + inbound - (other.forecast_daily or 0) * lead
+    return sum(
+        (max(Decimal(0), Decimal(q)) * s1.PRODUCTS[sku].unit_volume for sku, q in stocks.items()),
+        Decimal(0),
+    )
+
+
 def planning_input_from_case(case: CaseSpec, today: date, now: datetime) -> PlanningInput:
     p = s1.PRODUCTS[case.sku]
     supplier = s1.SUPPLIERS[p.supplier]
     amount, committed = s1.BUDGETS.get((case.node, p.category), (s1.DEFAULT_BUDGET_INR, Decimal(0)))
     lead = p.lead_time_days
-    other_load = sum(
-        (
-            max(Decimal(0), Decimal(n.on_hand - n.forecast_daily * lead))
-            * s1.PRODUCTS[n.sku].unit_volume
-            for n in case.zone_neighbours
-        ),
-        Decimal(0),
-    )
+    other_load = _zone_other_load(case, lead)
     return PlanningInput(
         sku=case.sku,
         node=case.node,
