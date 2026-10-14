@@ -10,12 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.main import create_app
 from app.modules.agent.llm.fake import ScriptedLlm
+from app.modules.agent.models import AgentRun
 from app.modules.agent.service import AgentService
 from app.modules.auth.seed import BUYER_EMAIL, seed_users
 from app.modules.notifications.broadcaster import InMemoryBroadcaster
 from app.modules.notifications.models import Notification
 from app.modules.notifications.service import NotificationService
 from app.seed.scenario1 import seed_scenario1
+from app.shared.enums import RunStatus
 
 TODAY = date(2026, 10, 14)
 NOW = datetime(2026, 10, 14, 6, 0, tzinfo=UTC)
@@ -33,9 +35,26 @@ async def test_broadcaster_delivers_to_every_subscriber_and_stops_after_unsubscr
     assert await asyncio.wait_for(b.get(), 1) == {"kind": "y"}
 
 
+async def _run_row(sessionmaker: async_sessionmaker[AsyncSession], run_id: str) -> None:
+    async with sessionmaker() as s:
+        s.add(
+            AgentRun(
+                id=run_id,
+                sku="COKE-750",
+                node_code="BANDRA",
+                status=RunStatus.FAILED,
+                replans_done=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        await s.commit()
+
+
 async def test_notify_persists_and_publishes(
     sessionmaker: async_sessionmaker[AsyncSession],
 ) -> None:
+    await _run_row(sessionmaker, "run1")
     hub = InMemoryBroadcaster()
     q = hub.subscribe()
     await NotificationService(sessionmaker, hub, clock=lambda: NOW).notify(
@@ -72,6 +91,7 @@ async def test_run_awaiting_approval_creates_a_notification(
 async def test_list_and_mark_read(sessionmaker: async_sessionmaker[AsyncSession]) -> None:
     async with sessionmaker() as s:
         await seed_users(s, get_settings())
+    await _run_row(sessionmaker, "r1")
     notes = NotificationService(sessionmaker, InMemoryBroadcaster(), clock=lambda: NOW)
     await notes.notify("r1", "failed", "boom")
     app = create_app()

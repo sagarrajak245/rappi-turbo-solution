@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.main import create_app
 from app.modules.agent.llm.fake import ScriptedLlm
-from app.modules.agent.router import get_agent_service
 from app.modules.agent.models import AgentRun
+from app.modules.agent.router import get_agent_service
 from app.modules.agent.service import AgentService
 from app.modules.auth import repository as users_repo
 from app.modules.auth.deps import current_user

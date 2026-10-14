@@ -27,6 +27,7 @@ class AgentRun(Base):
     unit_price_override: Mapped[Decimal | None] = mapped_column(Money)
     case_pack_override: Mapped[int | None]
     error: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime())
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime())
 
