@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import Conflict, NotFound
-from app.modules.erp_mock.models import ErpPurchaseOrder, ErpRequest
+from app.core.errors import Conflict, ErpTimeout, NotFound
+from app.modules.erp_mock import behaviours
+from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpRequest
 from app.modules.erp_mock.schemas import ErpDraftRequest, ErpPurchaseOrderOut
 from app.shared.enums import ErpPoStatus
 from app.shared.money import to_inr
@@ -65,6 +66,11 @@ def _record(
     return out
 
 
+async def _behaviour(session: AsyncSession, node_code: str, sku: str) -> ErpBehaviour | None:
+    stmt = select(ErpBehaviour).where(ErpBehaviour.node_code == node_code, ErpBehaviour.sku == sku)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def create_draft(
     session: AsyncSession, key: str, req: ErpDraftRequest, now: datetime
 ) -> ErpPurchaseOrderOut:
@@ -87,7 +93,9 @@ async def create_draft(
         created_at=now,
         updated_at=now,
     )
+    behaviour = await _behaviour(session, req.node_code, req.sku)  # before add: avoids autoflush
     session.add(po)
+    timeout = behaviours.apply("create", po, behaviour)
     out = _record(session, key, "create", digest, po, now)
     try:
         await session.commit()
@@ -98,6 +106,9 @@ async def create_draft(
         if row is None:
             raise
         return _replay(row, digest)
+    if timeout:
+        # The PO and ledger row are committed; the client just never sees the answer.
+        raise ErpTimeout("ERP timed out after creating the purchase order", {"key": key})
     return out
 
 
@@ -134,6 +145,7 @@ async def _transition(
         )
     po.status = target
     po.updated_at = now
+    behaviours.apply(op, po, await _behaviour(session, po.node_code, po.sku))
     out = _record(session, key, op, digest, po, now)
     try:
         await session.commit()
