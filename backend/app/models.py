@@ -1,6 +1,7 @@
 """Imports every module's ORM models so Base.metadata is complete (Alembic, create_all)."""
 
 from app.core.db import Base
+from app.modules.agent.models import AgentRun, LlmCall
 from app.modules.budget.models import Budget
 from app.modules.catalog.models import Node, Product
 from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpRequest
@@ -11,6 +12,7 @@ from app.modules.storage.models import StorageZone
 from app.modules.suppliers.models import Supplier, SupplierProduct
 
 __all__ = [
+    "AgentRun",
     "Base",
     "Budget",
     "DemandForecast",
@@ -18,6 +20,7 @@ __all__ = [
     "ErpPurchaseOrder",
     "ErpRequest",
     "InventorySnapshot",
+    "LlmCall",
     "Node",
     "PoLine",
     "Product",
