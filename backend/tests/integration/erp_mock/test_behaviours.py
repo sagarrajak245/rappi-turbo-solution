@@ -112,3 +112,12 @@ async def test_timeout_after_create_then_retry_returns_same_po(
         # a different key is not affected any more: the behaviour only fires once
         other = await service.create_draft(s, "k2", make_req(), NOW)
         assert other.mock_behaviour is None
+
+
+async def test_price_change_fires_once_so_the_new_price_is_accepted(session: AsyncSession) -> None:
+    await seed(session, "price_change", {"pct": "8"})
+    await service.create_draft(session, "k1", make_req(), NOW)
+    again = make_req().model_copy(update={"unit_price_inr": Decimal("108.00")})
+    po = await service.create_draft(session, "k2", again, NOW)
+    assert po.unit_price_inr == Decimal("108.00")
+    assert await fired(session) == 1
