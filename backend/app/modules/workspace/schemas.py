@@ -58,6 +58,7 @@ class StorageBar(_Frozen):
 
 class DashboardSummary(_Frozen):
     pending_approvals: int
+    needs_attention: int  # executed runs that failed and need a person to check the ERP
     committed_today_inr: Decimal
     agreement_pct: float | None  # approved as proposed / decided; None before any decision
     budgets: list[BudgetBar]

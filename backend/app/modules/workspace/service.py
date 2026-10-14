@@ -19,8 +19,9 @@ from app.modules.workspace.schemas import (
 )
 from app.shared.enums import RunStatus
 
-# Runs that wait on a person: approve/modify/reject, or acknowledge an escalation.
-NEEDS_DECISION = (RunStatus.AWAITING_APPROVAL, RunStatus.NEEDS_HUMAN, RunStatus.ESCALATED)
+# Only a run awaiting approval accepts a decision; these failed after execution and need a person
+# to check the ERP, outside the approve flow.
+NEEDS_ATTENTION = (RunStatus.NEEDS_HUMAN, RunStatus.ESCALATED)
 _JUDGED = {HumanAction.APPROVE, HumanAction.MODIFY, HumanAction.REJECT}
 
 
@@ -96,10 +97,12 @@ async def dashboard(session: AsyncSession, user: UserOut, now: datetime) -> Dash
     for (node_id, _), vol in on_hand.items():
         used[node_id] = used.get(node_id, Decimal(0)) + vol
 
-    waiting = await repo.list_runs_by_status(session, NEEDS_DECISION)
+    waiting = await repo.list_runs_by_status(session, (RunStatus.AWAITING_APPROVAL,))
+    attention = await repo.list_runs_by_status(session, NEEDS_ATTENTION)
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return DashboardSummary(
         pending_approvals=len(waiting),
+        needs_attention=len(attention),
         committed_today_inr=await repo.committed_since(session, list(code.values()), start_of_day),
         agreement_pct=_agreement_pct(await repo.list_decisions(session)),
         budgets=[
