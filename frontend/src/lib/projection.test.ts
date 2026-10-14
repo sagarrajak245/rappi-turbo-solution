@@ -21,6 +21,16 @@ describe("projectionRows", () => {
       { day: 2, label: "D+2", noOrder: 50, system: 110, agent: 90 },
     ]);
   });
+  it("adds the buyer's line once they changed the quantity", () => {
+    const rows = projectionRows({
+      no_order: series(0, [90, 70], 2),
+      system: series(60, [90, 70]),
+      agent: series(40, [90, 70]),
+      buyer: series(20, [90, 50]),
+      storage_ceiling: null,
+    });
+    expect(rows.map((r) => r.buyer)).toEqual([90, 50]);
+  });
   it("is empty without a projection", () => {
     expect(projectionRows(null)).toEqual([]);
   });

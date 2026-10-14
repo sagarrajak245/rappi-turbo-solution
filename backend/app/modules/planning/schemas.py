@@ -114,4 +114,5 @@ class StockProjection(_Frozen):
     no_order: ProjectionSeries
     system: ProjectionSeries
     agent: ProjectionSeries
+    buyer: ProjectionSeries | None = None  # set once the buyer changes the quantity
     storage_ceiling: int | None  # units the zone holds for this SKU; None when not modelled

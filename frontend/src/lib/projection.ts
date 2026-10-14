@@ -9,6 +9,7 @@ export interface StockProjection {
   no_order: ProjectionSeries;
   system: ProjectionSeries;
   agent: ProjectionSeries;
+  buyer?: ProjectionSeries | null; // present once the buyer changed the quantity
   storage_ceiling: number | null;
 }
 
@@ -18,6 +19,7 @@ export interface ProjectionRow {
   noOrder: number;
   system: number;
   agent: number;
+  buyer?: number;
 }
 
 export function projectionRows(p: StockProjection | null | undefined): ProjectionRow[] {
@@ -28,5 +30,6 @@ export function projectionRows(p: StockProjection | null | undefined): Projectio
     noOrder,
     system: p.system.stock[day] ?? 0,
     agent: p.agent.stock[day] ?? 0,
+    ...(p.buyer && { buyer: p.buyer.stock[day] ?? 0 }),
   }));
 }

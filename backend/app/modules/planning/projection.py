@@ -37,7 +37,11 @@ def _series(inp: PlanningInput, demand: _Demand, qty: int, days: int) -> Project
 
 
 def project_stock(
-    inp: PlanningInput, calc: CalcResult, qty: int, days: int = 14
+    inp: PlanningInput,
+    calc: CalcResult,
+    qty: int,
+    days: int = 14,
+    buyer_qty: int | None = None,
 ) -> StockProjection:
     demand = _Demand(inp)
     ceiling = None
@@ -48,5 +52,6 @@ def project_stock(
         no_order=_series(inp, demand, 0, days),
         system=_series(inp, demand, calc.qty or 0, days),
         agent=_series(inp, demand, qty, days),
+        buyer=None if buyer_qty is None else _series(inp, demand, buyer_qty, days),
         storage_ceiling=ceiling,
     )
