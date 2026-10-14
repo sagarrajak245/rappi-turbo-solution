@@ -20,7 +20,8 @@ class AgentState(TypedDict, total=False):
     flags: tuple[Flag, ...]
     calc: CalcResult
     baseline: ProposedDecision
-    lessons: list[str]  # recall_memory; stays empty until Session C
+    lessons: list[str]  # recall_memory: active lesson texts for this SKU x node
+    lesson_ids: list[int]
 
     skip_llm: bool  # blocking/escalate data: decided deterministically, no LLM call
     decision_out: DecisionOut
