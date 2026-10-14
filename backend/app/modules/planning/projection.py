@@ -1,7 +1,8 @@
 """Day-by-day stock projection for the review chart: no order vs the system qty vs the agent qty.
 
-Day 0 is today's available stock (on hand - reserved). Each later day adds what arrives that day
-(open POs at their ETA, the new order at the lead time), then sells that day's demand. Unmet
+Day 0 is today's available stock (on hand - reserved) plus anything arriving today. Each later day
+adds what arrives that day (open POs at their ETA, the new order at the lead time), then sells that
+day's demand. Unmet
 demand is lost, so stock never goes below 0; the first day demand goes unmet is the stockout.
 """
 
@@ -18,13 +19,15 @@ from app.modules.planning.schemas import (
 
 
 def _series(inp: PlanningInput, demand: _Demand, qty: int, days: int) -> ProjectionSeries:
-    stock = float(inp.on_hand - inp.reserved)
+    def arriving(day: int) -> int:
+        landed = sum(po.qty for po in inp.inbound if po.eta_offset == day)
+        return landed + (qty if day == inp.lead_time_days else 0)
+
+    stock = float(inp.on_hand - inp.reserved + arriving(0))
     points = [round(max(0.0, stock), 3)]
     stockout = None
     for day in range(1, days + 1):
-        stock += sum(po.qty for po in inp.inbound if po.eta_offset == day)
-        if day == inp.lead_time_days:
-            stock += qty
+        stock += arriving(day)
         stock -= demand.over(day, day)
         if stock < 0:
             stockout = stockout or day
