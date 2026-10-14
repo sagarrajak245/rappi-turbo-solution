@@ -81,6 +81,41 @@ class ErpSettings(BaseModel):
     max_replans: int = 1
 
 
+class LlmProviderSettings(BaseModel):
+    provider: str  # "groq" | "gemini"
+    model: str
+    price_in_per_mtok_usd: float = 0.0
+    price_out_per_mtok_usd: float = 0.0
+
+
+class LlmSettings(BaseModel):
+    """Model routing (KB D4). Keys come from env (GROQ_API_KEY, GEMINI_API_KEY), never here."""
+
+    decision: LlmProviderSettings = LlmProviderSettings(
+        provider="groq",
+        model="openai/gpt-oss-120b",
+        price_in_per_mtok_usd=0.15,
+        price_out_per_mtok_usd=0.60,
+    )
+    reviewer: LlmProviderSettings = LlmProviderSettings(
+        provider="groq",
+        model="qwen/qwen3.8-27b",
+        price_in_per_mtok_usd=0.29,
+        price_out_per_mtok_usd=0.59,
+    )
+    fallback: LlmProviderSettings = LlmProviderSettings(
+        provider="gemini",
+        model="gemini-2.5-flash",
+        price_in_per_mtok_usd=0.30,
+        price_out_per_mtok_usd=2.50,
+    )
+    timeout_s: float = 30.0
+    max_invalid_retries: int = 1  # retries on invalid JSON before falling back
+    max_review_attempts: int = 2  # reviewer failures before ESCALATE (R7)
+    max_tool_calls: int = 4  # read-only investigation calls per decision (D22)
+    fault_injection: str = ""  # "primary_down" -> the primary provider always fails (R5 demo)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
@@ -88,6 +123,8 @@ class Settings(BaseSettings):
     database_url: str = ""
     database_url_direct: str = ""
     redis_url: str = ""
+    groq_api_key: str = ""
+    gemini_api_key: str = ""
 
     app: AppSection = AppSection()
     database: DatabaseSection = DatabaseSection()
@@ -95,6 +132,7 @@ class Settings(BaseSettings):
     planning: PlanningSettings = PlanningSettings()
     data_quality: DataQualitySettings = DataQualitySettings()
     erp: ErpSettings = ErpSettings()
+    llm: LlmSettings = LlmSettings()
 
     @classmethod
     def settings_customise_sources(
