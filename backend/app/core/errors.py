@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,21 @@ async def _handle_app_error(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(_envelope(exc.code, exc.message, exc.details), exc.status_code)
 
 
+_HTTP_CODES = {
+    404: "not_found",
+    405: "method_not_allowed",
+    409: "conflict",
+    422: "validation_failed",
+}
+
+
+async def _handle_http_error(_: Request, exc: Exception) -> JSONResponse:
+    """Framework errors (unknown route, wrong method) use the same envelope as ours."""
+    assert isinstance(exc, HTTPException)
+    code = _HTTP_CODES.get(exc.status_code, "http_error")
+    return JSONResponse(_envelope(code, str(exc.detail), {}), exc.status_code)
+
+
 async def _handle_unexpected(_: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled error", exc_info=exc)
     return JSONResponse(_envelope("internal_error", "Internal server error", {}), 500)
@@ -61,4 +77,5 @@ async def _handle_unexpected(_: Request, exc: Exception) -> JSONResponse:
 
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _handle_app_error)
+    app.add_exception_handler(HTTPException, _handle_http_error)
     app.add_exception_handler(Exception, _handle_unexpected)
