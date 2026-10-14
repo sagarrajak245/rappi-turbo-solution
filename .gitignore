@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases (SQLite fallback mode)
+*.db
+*.db-journal
+backend/data/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
