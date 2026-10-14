@@ -6,6 +6,7 @@ from app.modules.auth.models import User
 from app.modules.budget.models import Budget
 from app.modules.catalog.models import Node, Product
 from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpRequest
+from app.modules.evaluation.models import EvalResult, EvalRun
 from app.modules.inventory.models import DemandForecast, InventorySnapshot, SalesHistory
 from app.modules.memory.models import Lesson
 from app.modules.notifications.models import Notification
@@ -22,6 +23,8 @@ __all__ = [
     "ErpBehaviour",
     "ErpPurchaseOrder",
     "ErpRequest",
+    "EvalResult",
+    "EvalRun",
     "InventorySnapshot",
     "Lesson",
     "LlmCall",

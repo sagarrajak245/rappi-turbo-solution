@@ -18,11 +18,13 @@ from app.modules.agent.router import router as agent_router
 from app.modules.agent.service import AgentService
 from app.modules.auth.router import router as auth_router
 from app.modules.erp_mock.router import router as erp_router
+from app.modules.evaluation.router import router as evaluation_router
 from app.modules.execution.router import router as execution_router
 from app.modules.memory.router import router as memory_router
 from app.modules.notifications.broadcaster import InMemoryBroadcaster
 from app.modules.notifications.router import router as notifications_router
 from app.modules.notifications.service import NotificationService
+from app.modules.observability.router import router as observability_router
 
 logger = logging.getLogger(__name__)
 
@@ -65,4 +67,6 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)
     app.include_router(auth_router)
     app.include_router(notifications_router)
+    app.include_router(observability_router)
+    app.include_router(evaluation_router)
     return app
