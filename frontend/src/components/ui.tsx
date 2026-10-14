@@ -44,7 +44,13 @@ export function StripedBar({ value, className }: { value: number; className?: st
   );
 }
 
-export function VerdictBadge({ verdict, outcome }: { verdict: Verdict; outcome?: string | null }) {
+export function VerdictBadge({
+  verdict,
+  outcome,
+}: {
+  verdict: Verdict | null;
+  outcome?: string | null;
+}) {
   const s = verdictStyle(verdict, outcome);
   return (
     <span className={cn("rounded-full px-3 py-1 text-xs font-medium", TONE_CLASS[s.tone])}>

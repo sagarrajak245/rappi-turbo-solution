@@ -13,8 +13,10 @@ const BASE: Record<Verdict, VerdictStyle> = {
   INVESTIGATE: { label: "Investigate", tone: "slate" },
 };
 
-export function verdictStyle(verdict: Verdict, outcome?: string | null): VerdictStyle {
-  if (outcome === "ESCALATED") return { label: "Escalated", tone: "red-outline" };
+/** Backend outcome is PROPOSE | ESCALATE; an escalated run has no verdict. */
+export function verdictStyle(verdict: Verdict | null, outcome?: string | null): VerdictStyle {
+  if (outcome === "ESCALATE") return { label: "Escalated", tone: "red-outline" };
+  if (verdict === null) return { label: "Pending", tone: "slate" };
   return BASE[verdict];
 }
 
