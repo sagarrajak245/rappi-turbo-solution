@@ -2,6 +2,7 @@
 
 import { useEffect, useReducer, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api/client";
@@ -9,6 +10,7 @@ import { notificationsReducer, unreadCount, type Notif } from "@/lib/notificatio
 
 export function NotificationBell() {
   const router = useRouter();
+  const qc = useQueryClient();
   const [items, dispatch] = useReducer(notificationsReducer, [] as Notif[]);
   const [open, setOpen] = useState(false);
 
@@ -22,6 +24,10 @@ export function NotificationBell() {
       try {
         const item = JSON.parse(ev.data) as Notif;
         dispatch({ type: "add", item });
+        // a run changed state: refresh the screens that show it (polling stays as the fallback)
+        for (const key of [["inbox"], ["dashboard"], ["notifications"], ["purchase-orders"], ["run", item.run_id]]) {
+          qc.invalidateQueries({ queryKey: key });
+        }
         toast(item.message, {
           action: item.run_id
             ? { label: "Open", onClick: () => router.push(`/runs/${item.run_id}`) }
@@ -35,7 +41,7 @@ export function NotificationBell() {
       closed = true;
       es.close();
     };
-  }, [router]);
+  }, [router, qc]);
 
   async function markRead(n: Notif) {
     if (!n.read_at) {
