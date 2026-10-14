@@ -105,3 +105,25 @@ async def test_f6_mismatch_after_submit_needs_human_and_is_not_cancelled(
     assert result.status is ExecutionStatus.NEEDS_HUMAN
     assert result.final_status is ErpPoStatus.SUBMITTED  # never cancelled silently
     assert [(d.field, d.actual) for d in result.deviations] == [("qty", "240")]
+
+
+async def test_rerun_after_submit_mismatch_never_cancels_the_submitted_po(
+    session: AsyncSession,
+) -> None:
+    # A client retry (e.g. lost response) must not let the draft handlers cancel a submitted PO.
+    first = await run(session, "F6")
+    again = await service.execute(session, order_for("F6"), TODAY, NOW, get_settings())
+    assert again.erp_number == first.erp_number
+    assert again.status is ExecutionStatus.NEEDS_HUMAN
+    assert again.final_status is ErpPoStatus.SUBMITTED
+
+
+async def test_replanned_order_reuses_proposal_id_as_a_new_erp_request(
+    session: AsyncSession,
+) -> None:
+    first = await run(session, "F1")
+    assert first.replan is not None
+    replanned = order_for("F1", replans=1).model_copy(update={"qty": first.replan.qty})
+    second = await service.execute(session, replanned, TODAY, NOW, get_settings())
+    assert second.erp_number != first.erp_number
+    assert await po_count(session) == 2
