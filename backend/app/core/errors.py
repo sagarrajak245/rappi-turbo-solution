@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
@@ -70,6 +71,16 @@ async def _handle_http_error(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(_envelope(code, str(exc.detail), {}), exc.status_code)
 
 
+async def _handle_request_validation(_: Request, exc: Exception) -> JSONResponse:
+    """Malformed requests (bad body, missing header) get the envelope, without echoing input."""
+    assert isinstance(exc, RequestValidationError)
+    errors = [{"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
+    return JSONResponse(
+        _envelope(ValidationFailed.code, "Request validation failed", {"errors": errors}),
+        ValidationFailed.status_code,
+    )
+
+
 async def _handle_unexpected(_: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled error", exc_info=exc)
     return JSONResponse(_envelope("internal_error", "Internal server error", {}), 500)
@@ -78,4 +89,5 @@ async def _handle_unexpected(_: Request, exc: Exception) -> JSONResponse:
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _handle_app_error)
     app.add_exception_handler(HTTPException, _handle_http_error)
+    app.add_exception_handler(RequestValidationError, _handle_request_validation)
     app.add_exception_handler(Exception, _handle_unexpected)
