@@ -30,7 +30,12 @@ const FACTS: [key: string, label: string][] = [
   ["protection_days", "Protection period (days)"],
 ];
 
-function inShort(p: Proposal): string {
+type Decision = NonNullable<Run["decision"]>;
+
+function inShort(p: Proposal, d: Decision | null | undefined): string {
+  if (d?.action === "modify" && d.qty != null)
+    return d.qty === 0 ? `You chose not to order (the agent proposed ${p.qty}).` : `You ordered ${d.qty} instead of the agent's ${p.qty}.`;
+  if (d?.action === "reject") return "You rejected this proposal; nothing was ordered.";
   if (p.outcome === "ESCALATE") return "No valid order fits the limits; a person has to choose a way out.";
   if (p.verdict === "INVESTIGATE") return "The data is not trustworthy enough to order; investigate first.";
   if (p.verdict === "REJECT") return `Don't order: the recommended ${p.rec_qty} is not needed.`;
@@ -74,7 +79,8 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
         <div className="space-y-6">
           <Card dark>
             <p className="text-sm text-white/60">In short</p>
-            <p className="mt-1 text-2xl font-light">{inShort(p)}</p>
+            <p className="mt-1 text-2xl font-light">{inShort(p, r.decision)}</p>
+            {r.decision?.reason && <p className="mt-2 text-white/80">Your reason: {r.decision.reason}</p>}
             <ul className="mt-3 list-disc space-y-1 pl-5 text-white/80">
               {p.reasons.map((x) => (
                 <li key={x}>{x}</li>
@@ -234,7 +240,8 @@ function Result({ run }: { run: Run }) {
           </div>
           {ex.erp_number && (
             <p className="text-sm">
-              ERP order <span className="font-mono">{ex.erp_number}</span> · {ex.final_status}
+              ERP order <span className="font-mono">{ex.erp_number}</span> · {run.decision?.qty ?? run.proposal?.qty} units ·{" "}
+              {ex.final_status}
             </p>
           )}
           {ex.deviations.length > 0 && (

@@ -998,6 +998,7 @@ export interface components {
             status: components["schemas"]["RunStatus"];
             proposal?: components["schemas"]["ProposalOut"] | null;
             execution?: components["schemas"]["ExecutionResult"] | null;
+            decision?: components["schemas"]["HumanDecision"] | null;
             /**
              * Replans Done
              * @default 0
@@ -1064,6 +1065,7 @@ export interface components {
             no_order: components["schemas"]["ProjectionSeries"];
             system: components["schemas"]["ProjectionSeries"];
             agent: components["schemas"]["ProjectionSeries"];
+            buyer?: components["schemas"]["ProjectionSeries"] | null;
             /** Storage Ceiling */
             storage_ceiling: number | null;
         };
