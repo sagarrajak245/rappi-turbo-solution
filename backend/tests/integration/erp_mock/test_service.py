@@ -39,7 +39,7 @@ async def test_create_same_key_twice_returns_one_po(session: AsyncSession) -> No
     a = await service.create_draft(session, "k1", make_req(), NOW)
     b = await service.create_draft(session, "k1", make_req(), NOW)
     assert a.erp_number == b.erp_number
-    assert a.status is ErpPoStatus.draft
+    assert a.status is ErpPoStatus.DRAFT
     assert a.total_inr == Decimal("2400.00")
     assert a.erp_number.startswith("ERP-")
     assert await count_pos(session) == 1
@@ -61,8 +61,8 @@ async def test_replayed_submit_returns_stored_response(session: AsyncSession) ->
     po = await service.create_draft(session, "c1", make_req(), NOW)
     first = await service.submit(session, po.erp_number, "s1", NOW)
     again = await service.submit(session, po.erp_number, "s1", NOW)
-    assert first.status is ErpPoStatus.submitted
-    assert again.status is ErpPoStatus.submitted
+    assert first.status is ErpPoStatus.SUBMITTED
+    assert again.status is ErpPoStatus.SUBMITTED
     assert again.updated_at == first.updated_at
 
 
@@ -91,9 +91,9 @@ async def test_create_recovers_when_po_inserted_by_racer(
 async def test_draft_submit_cancel_path(session: AsyncSession) -> None:
     po = await service.create_draft(session, "c1", make_req(), NOW)
     sub = await service.submit(session, po.erp_number, "s1", NOW)
-    assert sub.status is ErpPoStatus.submitted
+    assert sub.status is ErpPoStatus.SUBMITTED
     can = await service.cancel(session, po.erp_number, "x1", NOW)
-    assert can.status is ErpPoStatus.cancelled
+    assert can.status is ErpPoStatus.CANCELLED
 
 
 async def test_second_submit_with_new_key_conflicts(session: AsyncSession) -> None:
@@ -104,9 +104,11 @@ async def test_second_submit_with_new_key_conflicts(session: AsyncSession) -> No
 
 
 async def test_cancel_after_rejected_conflicts(session: AsyncSession) -> None:
-    po = await service.create_draft(session, "c1", make_req(), NOW)
-    po.status = ErpPoStatus.rejected
+    out = await service.create_draft(session, "c1", make_req(), NOW)
+    stmt = select(ErpPurchaseOrder).where(ErpPurchaseOrder.erp_number == out.erp_number)
+    (await session.execute(stmt)).scalar_one().status = ErpPoStatus.REJECTED
     await session.commit()
+    po = out
     with pytest.raises(Conflict):
         await service.cancel(session, po.erp_number, "x1", NOW)
 
