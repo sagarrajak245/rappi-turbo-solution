@@ -19,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.errors import Conflict, NotFound
 from app.modules.agent import repository as repo
-from app.modules.agent.graph import GraphDeps, build_graph, human_verdict, validation_feedback
+from app.modules.agent.graph import (
+    GraphDeps,
+    build_graph,
+    human_verdict,
+    review_facts,
+    validation_feedback,
+)
 from app.modules.agent.llm.base import LlmClient
 from app.modules.agent.models import AgentRun
 from app.modules.agent.schemas import (
@@ -457,6 +463,8 @@ class AgentService:
                 "flags": list(v.flags),
                 "issues": list(v.issues) + [x.message for x in v.violations],
                 "suggestions": list(v.suggestions),
+                "facts": review_facts(changed, calc, flags),
+                "projection": planning.project_stock(changed, calc, v.qty or 0),
             }
         )
         return {
