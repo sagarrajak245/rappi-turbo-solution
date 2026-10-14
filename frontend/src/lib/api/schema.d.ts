@@ -509,6 +509,8 @@ export interface components {
         DashboardSummary: {
             /** Pending Approvals */
             pending_approvals: number;
+            /** Needs Attention */
+            needs_attention: number;
             /** Committed Today Inr */
             committed_today_inr: string;
             /** Agreement Pct */
