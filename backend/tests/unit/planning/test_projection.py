@@ -66,3 +66,10 @@ def test_stock_arriving_today_counts_on_day_zero() -> None:
     proj = project_stock(inp, calculate(inp, get_settings().planning), 60, days=2)
     assert proj.no_order.stock == (120, 100, 80)
     assert proj.agent.stock == (180, 160, 140)
+
+
+def test_buyer_series_only_when_the_buyer_picked_a_quantity() -> None:
+    calc = calculate(INP, get_settings().planning)
+    assert project_stock(INP, calc, 60, days=10).buyer is None
+    proj = project_stock(INP, calc, 60, days=10, buyer_qty=60)
+    assert proj.buyer == proj.agent

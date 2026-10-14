@@ -126,6 +126,26 @@ async def test_f1_price_rise_replans_then_completes(
 
 
 @pytest.mark.usefixtures("seeded")
+async def test_modify_is_shown_on_the_run_with_its_own_projection(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    svc = make(sessionmaker, [accept(800)])
+    run = await svc.start_run("COKE-750", "BANDRA")
+    await svc.drain()
+
+    done = await svc.decide(
+        run.id, HumanDecision(action=HumanAction.MODIFY, qty=700, reason="slow month")
+    )
+    assert done.status is RunStatus.COMPLETED
+    assert done.decision is not None and done.decision.qty == 700
+    assert done.proposal is not None and done.proposal.qty == 800  # the agent's view is kept
+    projection = done.proposal.projection
+    assert projection is not None and projection.buyer is not None
+    assert projection.buyer.qty == 700
+    assert projection.buyer.stock != projection.agent.stock
+
+
+@pytest.mark.usefixtures("seeded")
 async def test_modify_with_invalid_qty_keeps_waiting(
     sessionmaker: async_sessionmaker[AsyncSession],
 ) -> None:
