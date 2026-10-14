@@ -1,11 +1,13 @@
 """Structured LLM outputs (KB §3.2 nodes 5 and 7) and the agent API DTOs."""
 
+from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.execution.schemas import ExecutionResult
-from app.modules.planning.schemas import Flag, ResolutionOption
+from app.modules.planning.schemas import Flag, ResolutionOption, StockProjection
 from app.modules.validation.schemas import ProposedDecision, SoftOverride
 from app.shared.enums import Outcome, RunStatus, Verdict
 
@@ -74,6 +76,8 @@ class ProposalOut(_Frozen):
     attempts: int = 0
     llm_calls: int = 0
     lessons_applied: list[int] = []  # lesson ids that reached the decide prompt
+    facts: dict[str, Any] = {}  # the numbers behind the decision, for the review page
+    projection: StockProjection | None = None  # 14-day stock: no order / system / agent qty
 
 
 class HumanAction(StrEnum):
@@ -89,6 +93,24 @@ class HumanDecision(_Frozen):
     action: HumanAction
     qty: int | None = Field(default=None, ge=0)
     reason: str | None = None
+
+
+class RunSummary(_Frozen):
+    """One row of a run list: enough to triage it without loading the full proposal."""
+
+    id: str
+    sku: str
+    node: str
+    status: RunStatus
+    verdict: Verdict | None = None
+    qty: int | None = None
+    rec_qty: int | None = None
+    outcome: Outcome | None = None
+    reason: str | None = None  # the proposal's first reason
+    error: str | None = None
+    decided_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class RunOut(_Frozen):

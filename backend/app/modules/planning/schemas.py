@@ -102,3 +102,16 @@ class CalcResult(_Frozen):
     flags: tuple[Flag, ...] = ()
     cover_days: float | None = None
     options: tuple[ResolutionOption, ...] = ()
+
+
+class ProjectionSeries(_Frozen):
+    qty: int  # units ordered in this scenario (0 = no order)
+    stock: tuple[float, ...]  # end-of-day stock for day 0 (today) .. day N
+    stockout_day: int | None  # first day demand goes unmet, None if never
+
+
+class StockProjection(_Frozen):
+    no_order: ProjectionSeries
+    system: ProjectionSeries
+    agent: ProjectionSeries
+    storage_ceiling: int | None  # units the zone holds for this SKU; None when not modelled

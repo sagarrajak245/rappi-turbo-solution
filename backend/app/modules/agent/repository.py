@@ -22,6 +22,15 @@ async def list_run_ids_by_status(session: AsyncSession, status: RunStatus) -> Se
     return (await session.execute(stmt)).scalars().all()
 
 
+async def list_runs(
+    session: AsyncSession, status: RunStatus | None, limit: int
+) -> Sequence[AgentRun]:
+    stmt = select(AgentRun).order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(limit)
+    if status is not None:
+        stmt = stmt.where(AgentRun.status == status)
+    return (await session.execute(stmt)).scalars().all()
+
+
 async def claim(
     session: AsyncSession, run_id: str, expected: RunStatus, new: RunStatus, now: datetime
 ) -> bool:

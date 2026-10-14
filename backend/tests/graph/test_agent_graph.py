@@ -73,3 +73,18 @@ async def test_q7_notes_never_reach_the_llm(make_service: MakeService) -> None:
     prompt = decide.calls[0][1].lower()
     assert "ignore all previous" not in prompt and "5000" not in prompt
     assert "suspicious_text" in prompt
+
+
+async def test_proposal_carries_review_facts_and_projection(make_service: MakeService) -> None:
+    svc, _, _ = await make_service([ACCEPT_800], [OK])
+    p = (await svc.propose("t", "COKE-750", "BANDRA"))[0]
+    assert p.facts["case_pack"] > 0 and "stock_at_arrival" in p.facts
+    assert p.projection is not None
+    assert (p.projection.agent.qty, p.projection.system.qty) == (800, 800)
+    assert p.projection.no_order.qty == 0 and len(p.projection.agent.stock) == 15
+
+
+async def test_escalated_proposal_projects_no_order(make_service: MakeService) -> None:
+    svc, _, _ = await make_service([], [])
+    p = (await svc.propose("t", "HALDIRAM-BHUJIA-200", "POWAI"))[0]
+    assert p.projection is not None and p.projection.agent.qty == 0

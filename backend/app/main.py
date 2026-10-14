@@ -25,6 +25,7 @@ from app.modules.notifications.broadcaster import InMemoryBroadcaster
 from app.modules.notifications.router import router as notifications_router
 from app.modules.notifications.service import NotificationService
 from app.modules.observability.router import router as observability_router
+from app.modules.workspace.router import router as workspace_router
 
 logger = logging.getLogger(__name__)
 
@@ -71,4 +72,5 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(observability_router)
     app.include_router(evaluation_router)
+    app.include_router(workspace_router)
     return app

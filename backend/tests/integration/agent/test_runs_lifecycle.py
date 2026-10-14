@@ -109,10 +109,16 @@ async def test_f1_price_rise_replans_then_completes(
     run = await svc.start_run("NESCAFE-50", "ANDHERI-W")
     await svc.drain()
 
+    before = (await svc.get_run(run.id)).proposal
     replanned = await svc.decide(run.id, APPROVE)
     assert replanned.status is RunStatus.AWAITING_APPROVAL
     assert replanned.replans_done == 1
     assert replanned.proposal is not None and replanned.proposal.qty == 210
+    # the review shows the ERP's new terms, not the ones the first proposal was built on
+    assert before is not None
+    assert replanned.proposal.facts["unit_cost_inr"] != before.facts["unit_cost_inr"]
+    assert replanned.proposal.projection is not None
+    assert replanned.proposal.projection.agent.qty == 210
 
     done = await svc.decide(run.id, APPROVE)
     assert done.status is RunStatus.COMPLETED
