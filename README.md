@@ -5,7 +5,7 @@ approval, and verifies the result** — not a chatbot. Built for the Rappi "AI B
 (Mumbai branch, INR).
 
 > **Status:** under construction. Session A builds the deterministic core (data model, mock ERP,
-> calculator, validator). See [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md) for every design decision.
+> calculator, validator). Design decisions will be documented in `docs/`.
 
 ## How it works (short)
 
