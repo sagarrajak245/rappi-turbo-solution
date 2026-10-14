@@ -24,6 +24,7 @@ from app.modules.agent.llm.base import LlmClient, LlmUnavailable
 from app.modules.agent.prompts import load_prompt
 from app.modules.agent.schemas import DecisionOut, ProposalOut, ReviewOut
 from app.modules.agent.state import AgentState
+from app.modules.memory import service as memory
 from app.modules.planning import service as planning
 from app.modules.planning.schemas import CalcResult, Flag, PlanningInput
 from app.modules.validation import service as validation
@@ -136,7 +137,10 @@ def build_graph(
         return {"calc": calc, "baseline": validation.baseline_decision(calc)}
 
     async def recall_memory(state: AgentState) -> AgentState:
-        return {"lessons": []}  # episodes and lessons arrive in Session C (P12)
+        # Active lessons the buyer confirmed for this SKU x node (D25); soft guidance only.
+        async with deps.sessionmaker() as session:
+            found = await memory.active_for(session, state["sku"], state["node"])
+        return {"lessons": [x.text for x in found], "lesson_ids": [x.id for x in found]}
 
     async def deterministic(state: AgentState) -> AgentState:
         decision = _forced_decision(state["flags"], state["calc"])
@@ -222,6 +226,7 @@ def build_graph(
             suggestions=list(v.suggestions),
             attempts=state.get("attempts", 0),
             llm_calls=len(state.get("llm_records", [])),
+            lessons_applied=state.get("lesson_ids", []) if not state.get("skip_llm") else [],
         )
         return {"proposal": proposal}
 

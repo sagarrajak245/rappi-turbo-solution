@@ -36,9 +36,7 @@ def make(
     sm: async_sessionmaker[AsyncSession], decide: list[dict[str, Any] | Exception]
 ) -> tuple[AgentService, ScriptedLlm]:
     llm = ScriptedLlm(decide)
-    svc = AgentService(
-        sm, llm, ScriptedLlm([OK] * len(decide)), get_settings(), clock=lambda: NOW
-    )
+    svc = AgentService(sm, llm, ScriptedLlm([OK] * len(decide)), get_settings(), clock=lambda: NOW)
     return svc, llm
 
 

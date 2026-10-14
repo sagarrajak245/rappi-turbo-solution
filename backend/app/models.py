@@ -6,6 +6,7 @@ from app.modules.budget.models import Budget
 from app.modules.catalog.models import Node, Product
 from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpRequest
 from app.modules.inventory.models import DemandForecast, InventorySnapshot, SalesHistory
+from app.modules.memory.models import Lesson
 from app.modules.purchasing.models import PoLine, PurchaseOrder
 from app.modules.recommendations.models import Recommendation
 from app.modules.storage.models import StorageZone
@@ -20,6 +21,7 @@ __all__ = [
     "ErpPurchaseOrder",
     "ErpRequest",
     "InventorySnapshot",
+    "Lesson",
     "LlmCall",
     "Node",
     "PoLine",

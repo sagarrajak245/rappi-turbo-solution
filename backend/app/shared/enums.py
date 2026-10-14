@@ -80,3 +80,11 @@ class RunStatus(StrEnum):
     ESCALATED = "escalated"
     NEEDS_HUMAN = "needs_human"
     FAILED = "failed"
+
+
+class LessonStatus(StrEnum):
+    """A lesson from buyer feedback (D25): pending until the buyer confirms it."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    DISABLED = "disabled"

@@ -27,6 +27,7 @@ from app.modules.agent.state import AgentState
 from app.modules.erp_mock import service as erp
 from app.modules.execution import service as execution
 from app.modules.execution.schemas import ApprovedOrder, ExecutionResult, ExecutionStatus
+from app.modules.memory import service as memory
 from app.modules.planning import service as planning
 from app.modules.planning.schemas import PlanningInput
 from app.modules.validation import service as validation
@@ -154,6 +155,7 @@ class AgentService:
             )
             if written:
                 repo.add_llm_calls(session, run_id, state.get("llm_records", []), now)
+                await memory.mark_applied(session, proposal.lessons_applied, now)
             await session.commit()
 
     async def _fail(self, run_id: str, reason: str) -> None:
@@ -252,6 +254,7 @@ class AgentService:
             p = ProposalOut.model_validate(row.proposal)
 
             if human.action is HumanAction.REJECT:
+                self._learn(session, row, human, now)
                 await repo.update_run(
                     session, run_id, now, status=RunStatus.REJECTED, decision=decision, error=None
                 )
@@ -285,6 +288,7 @@ class AgentService:
                     await session.commit()
                     return
                 qty = human.qty
+                self._learn(session, row, human, now)
             elif not (p.valid and p.outcome is Outcome.PROPOSE and p.qty):
                 # Nothing orderable was proposed (escalation, no-buy): approving acknowledges it.
                 await repo.update_run(
@@ -328,6 +332,12 @@ class AgentService:
                 values["status"] = _EXECUTION_TO_RUN[result.status]
             await repo.update_run(session, run_id, now, **values)
             await session.commit()
+
+    @staticmethod
+    def _learn(session: AsyncSession, row: AgentRun, human: HumanDecision, now: datetime) -> None:
+        """A reasoned REJECT or MODIFY becomes a pending lesson for the buyer to confirm (D25)."""
+        if human.reason and human.reason.strip():
+            memory.record_feedback(session, row.id, row.sku, row.node_code, human.reason, now)
 
     def _check_modify(self, human: HumanDecision, inp: PlanningInput, now: datetime) -> str | None:
         if human.qty is None:
