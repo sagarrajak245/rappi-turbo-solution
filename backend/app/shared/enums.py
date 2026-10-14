@@ -25,6 +25,21 @@ class FlagSeverity(StrEnum):
     ESCALATE = "escalate"  # no safe action possible -> ESCALATE
 
 
+class FlagCode(StrEnum):
+    """Facts worth telling the buyer about. Severity is decided by the validation policy."""
+
+    STALE_SNAPSHOT = "stale_snapshot"
+    NEGATIVE_ON_HAND = "negative_on_hand"
+    NO_FORECAST = "no_forecast"  # fell back to the sales average
+    NO_DEMAND_DATA = "no_demand_data"  # no forecast and no sales either
+    OVERDUE_PO = "overdue_po"
+    SUPPLIER_INACTIVE = "supplier_inactive"
+    FORECAST_SALES_GAP = "forecast_sales_gap"
+    SUSPICIOUS_TEXT = "suspicious_text"  # free text that looks like an instruction (Q7)
+    STOCKOUT_BEFORE_ARRIVAL = "stockout_before_arrival"
+    PARTIAL_COVERAGE = "partial_coverage"  # a cap forced less than the need
+
+
 class ConstraintCode(StrEnum):
     """Hard constraints (KB D18): never bypassable by a reason."""
 
