@@ -20,12 +20,16 @@ def test_repo_settings_yaml_is_loaded_by_default() -> None:
 
 
 def test_yaml_values_override_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SETTINGS_FILE", str(_write_yaml(tmp_path, "planning:\n  order_cycle_days: 9\n")))
+    monkeypatch.setenv(
+        "SETTINGS_FILE", str(_write_yaml(tmp_path, "planning:\n  order_cycle_days: 9\n"))
+    )
     assert Settings().planning.order_cycle_days == 9
 
 
 def test_env_overrides_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SETTINGS_FILE", str(_write_yaml(tmp_path, "planning:\n  order_cycle_days: 9\n")))
+    monkeypatch.setenv(
+        "SETTINGS_FILE", str(_write_yaml(tmp_path, "planning:\n  order_cycle_days: 9\n"))
+    )
     monkeypatch.setenv("PLANNING__ORDER_CYCLE_DAYS", "5")
     assert Settings().planning.order_cycle_days == 5
 
@@ -42,6 +46,8 @@ def test_missing_yaml_falls_back_to_defaults(
 def test_service_level_without_z_value_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("SETTINGS_FILE", str(_write_yaml(tmp_path, "planning:\n  service_level: 0.97\n")))
+    monkeypatch.setenv(
+        "SETTINGS_FILE", str(_write_yaml(tmp_path, "planning:\n  service_level: 0.97\n"))
+    )
     with pytest.raises(ValidationError, match="service_level"):
         Settings()

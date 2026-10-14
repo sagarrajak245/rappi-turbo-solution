@@ -13,7 +13,7 @@ database:
 
 logging:
   level: INFO
-  json: true
+  json_format: true
 
 planning:
   order_cycle_days: 7            # R in P = L + R
