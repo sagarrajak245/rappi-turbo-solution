@@ -57,8 +57,12 @@ def test_identical_po_has_no_deviation() -> None:
 
 @pytest.mark.parametrize(
     ("price", "expected"),
-    [("102.00", {}), ("102.01", {"unit_price_inr": Severity.MATERIAL}), ("108.00", {"unit_price_inr": Severity.MATERIAL})],
-)  # fmt: skip
+    [
+        ("102.00", {}),
+        ("102.01", {"unit_price_inr": Severity.MATERIAL}),
+        ("108.00", {"unit_price_inr": Severity.MATERIAL}),
+    ],
+)
 def test_price_within_tolerance_is_ignored(price: str, expected: dict[str, Severity]) -> None:
     assert fields(compare(ORDER, po(unit_price_inr=Decimal(price)), ErpSettings())) == expected
 
