@@ -44,7 +44,6 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(length=30), nullable=False),
         sa.Column("run_id", sa.String(length=32), nullable=True),
         sa.Column("message", sa.Text(), nullable=False),
-        sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
             ["run_id"], ["agent_runs.id"], name=op.f("fk_notifications_run_id_agent_runs")
@@ -56,6 +55,22 @@ def upgrade() -> None:
     )
     with op.batch_alter_table("notifications", schema=None) as batch_op:
         batch_op.create_index(batch_op.f("ix_notifications_user_id"), ["user_id"], unique=False)
+
+    op.create_table(
+        "notification_reads",
+        sa.Column("notification_id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.String(length=32), nullable=False),
+        sa.Column("read_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["notification_id"],
+            ["notifications.id"],
+            name=op.f("fk_notification_reads_notification_id_notifications"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["user_id"], ["users.id"], name=op.f("fk_notification_reads_user_id_users")
+        ),
+        sa.PrimaryKeyConstraint("notification_id", "user_id", name=op.f("pk_notification_reads")),
+    )
 
     with op.batch_alter_table("agent_runs", schema=None) as batch_op:
         batch_op.add_column(sa.Column("decided_by", sa.String(length=32), nullable=True))
@@ -69,6 +84,8 @@ def downgrade() -> None:
     with op.batch_alter_table("agent_runs", schema=None) as batch_op:
         batch_op.drop_constraint(batch_op.f("fk_agent_runs_decided_by_users"), type_="foreignkey")
         batch_op.drop_column("decided_by")
+
+    op.drop_table("notification_reads")
 
     with op.batch_alter_table("notifications", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_notifications_user_id"))

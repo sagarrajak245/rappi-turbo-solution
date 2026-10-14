@@ -1,3 +1,5 @@
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import AuthSettings
@@ -17,7 +19,9 @@ async def login(
 ) -> tuple[UserOut, str]:
     """Check credentials; return the user and a session token. The error never says which part."""
     user = await repo.get_by_email(session, email.strip().lower())
-    ok = verify_password(password, user.password_hash if user else DUMMY_HASH)
+    # scrypt is deliberately slow; keep it off the event loop so login never stalls others.
+    stored = user.password_hash if user else DUMMY_HASH
+    ok = await asyncio.to_thread(verify_password, password, stored)
     if user is None or not ok:
         raise Unauthorized("Invalid email or password")
     return UserOut.model_validate(user), issue_token(user.id, auth)

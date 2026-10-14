@@ -9,7 +9,7 @@ from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpReque
 from app.modules.evaluation.models import EvalResult, EvalRun
 from app.modules.inventory.models import DemandForecast, InventorySnapshot, SalesHistory
 from app.modules.memory.models import Lesson
-from app.modules.notifications.models import Notification
+from app.modules.notifications.models import Notification, NotificationRead
 from app.modules.purchasing.models import PoLine, PurchaseOrder
 from app.modules.recommendations.models import Recommendation
 from app.modules.storage.models import StorageZone
@@ -30,6 +30,7 @@ __all__ = [
     "LlmCall",
     "Node",
     "Notification",
+    "NotificationRead",
     "PoLine",
     "Product",
     "PurchaseOrder",

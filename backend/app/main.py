@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One shared HTTP client for every LLM call; the service owns the background run tasks.
     settings = get_settings()
+    # Live events stay in this process: run one worker until the Redis broadcaster (P7) lands.
+    # GET /notifications reads the DB, so a missed live event is never lost.
     notifications = NotificationService(get_sessionmaker(), InMemoryBroadcaster())
     app.state.notifications = notifications
     async with httpx.AsyncClient() as http:

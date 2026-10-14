@@ -131,6 +131,9 @@ class AuthSettings(BaseModel):
     seed_admin_password: str = "dev-admin-password"
 
 
+_DEV_ENVS = frozenset({"local", "test"})
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
@@ -149,6 +152,21 @@ class Settings(BaseSettings):
     erp: ErpSettings = ErpSettings()
     llm: LlmSettings = LlmSettings()
     auth: AuthSettings = AuthSettings()
+
+    @model_validator(mode="after")
+    def _no_dev_auth_defaults_outside_local(self) -> Self:
+        # A known JWT secret lets anyone forge a session; known seed passwords open the admin.
+        if self.app_env in _DEV_ENVS:
+            return self
+        dev = AuthSettings()
+        stale = [
+            f"AUTH__{name.upper()}"
+            for name in ("jwt_secret", "seed_buyer_password", "seed_admin_password")
+            if getattr(self.auth, name) == getattr(dev, name)
+        ]
+        if stale:
+            raise ValueError(f"set real values for {', '.join(stale)} (APP_ENV={self.app_env})")
+        return self
 
     @classmethod
     def settings_customise_sources(
