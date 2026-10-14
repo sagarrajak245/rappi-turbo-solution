@@ -10,6 +10,7 @@ from app.core.db import dispose_engine
 from app.core.errors import register_error_handlers
 from app.core.health import router as health_router
 from app.core.logging import configure_logging
+from app.modules.erp_mock.router import router as erp_router
 
 
 @asynccontextmanager
@@ -25,4 +26,5 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Rappi Turbo — AI Purchasing Agent", version="0.1.0", lifespan=_lifespan)
     register_error_handlers(app)
     app.include_router(health_router)
+    app.include_router(erp_router)
     return app
