@@ -170,7 +170,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
 
           <details className="rounded-[24px] bg-white/50 p-6">
             <summary className="cursor-pointer">How the agent got here</summary>
-            <dl className="mt-3 grid grid-cols-2 gap-y-1.5 text-sm sm:grid-cols-4">
+            <dl className="mt-3 grid max-w-md grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
               <FactRow label="Review attempts" value={String(p.attempts)} />
               <FactRow label="LLM calls" value={String(p.llm_calls)} />
               <FactRow label="System qty" value={String(p.baseline_qty ?? "—")} />
