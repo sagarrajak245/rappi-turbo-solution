@@ -1,4 +1,68 @@
-# Scenario 1 — formula rulings and case expectations
+# Scenario 1 — Purchase Recommendation Review
+
+## What we are trying to do
+
+### The situation
+
+A quick-commerce dark store (for example, Bandra in Mumbai) sells a product such as Coca-Cola
+750 ml every day. A replenishment system looks at the numbers and says: **"buy 800 units."**
+
+A buyer has to decide whether to trust that. Today they open several screens and check:
+
+- How much is on the shelf, and how much is already promised to customer orders?
+- How much will we sell before the next delivery could arrive, and how uneven are sales?
+- Are orders already on the way, and will they arrive in time? Is any of them overdue?
+- How long does the supplier take, what is their minimum order, and how many units come in a case?
+- Is there budget left this month, and will 800 units physically fit in the store?
+- Will a perishable product sell before it expires?
+
+Then they decide: **accept** the 800, **change** it, **reject** it, or **investigate** because
+something in the data looks wrong. Done for hundreds of product × store pairs every week, this is
+slow, and easy to get wrong.
+
+### The goal
+
+Build an agent that does this review for the buyer and then carries the decision through, without
+the buyer giving up control:
+
+1. **Don't trust the recommendation.** Recompute what is actually needed from the raw data.
+2. **Respect every real-world limit at once:** budget, storage space, shelf life, minimum order
+   and case pack. A limit is never broken because a reason sounds convincing.
+3. **Notice bad data** (stale stock counts, negative stock, missing or suspicious forecasts) and
+   ask for an investigation instead of guessing.
+4. **Explain the decision in plain words**, citing the facts it used, so the buyer can check it
+   in seconds.
+5. **Let the buyer decide.** Nothing is ordered until the buyer approves, changes or rejects it.
+6. **Place the order and check it really happened.** After approval, create the order in the ERP,
+   read it back, and compare it with what was approved. If the supplier changed the price, the
+   pack size or the date, react: re-plan, ask the buyer again, or escalate. Never assume success.
+7. **Learn from the buyer.** When the buyer changes a decision and says why, remember it for that
+   product and store next time.
+
+### What success looks like
+
+- The agent reaches the same answer a careful buyer would, across normal cases and edge cases
+  (25 seeded cases, see below).
+- **No order ever breaks a hard limit.**
+- Every order in the ERP matches what a person approved, or the mismatch is surfaced to a person.
+- The buyer spends their time on the few cases that need judgment, not on the arithmetic.
+
+### What the agent can answer
+
+| Result | Meaning | Example |
+|---|---|---|
+| **ACCEPT** | 800 is right | Demand and stock support it (C1) |
+| **MODIFY** | Another quantity is right | Open orders already cover part of it (C3), the budget allows only 500 (C7), the case pack is 48 so 800 becomes 816 (C6) |
+| **REJECT** | Don't order now | Stock plus open orders already cover the need (C2) |
+| **INVESTIGATE** | The data can't be trusted | Stock count older than 24 hours (Q1), forecast twice actual sales (Q6) |
+| **ESCALATE** | No valid order exists | Minimum order costs more than the budget left (C9), supplier inactive (Q5). The buyer gets pre-checked options. |
+
+The rest of this page is the exact rulebook: the formulas, the data checks, and the expected
+answer for each case.
+
+---
+
+## Formula rulings and case expectations
 
 The deterministic core (`backend/app/modules/planning`, `backend/app/modules/validation`) decides every Scenario 1 case without an LLM. This page records how ambiguous parts of the spec were resolved. Every expected number in the case table (`backend/app/scenarios/scenario1.py`) was derived by hand from these rules, cross-checked with an independent script, and never taken from the code's output.
 
