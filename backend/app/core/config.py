@@ -113,6 +113,7 @@ class LlmSettings(BaseModel):
     max_invalid_retries: int = 1  # retries on invalid JSON before falling back
     max_review_attempts: int = 2  # reviewer failures before ESCALATE (R7)
     max_tool_calls: int = 4  # read-only investigation calls per decision (D22)
+    fault_injection: str = ""  # "primary_down" -> the primary provider always fails (R5 demo)
 
 
 class Settings(BaseSettings):

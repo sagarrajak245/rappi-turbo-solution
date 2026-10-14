@@ -53,3 +53,4 @@ llm:
   max_invalid_retries: 1   # retry once on invalid JSON, then fall back
   max_review_attempts: 2   # reviewer fails twice -> ESCALATE (R7)
   max_tool_calls: 4        # read-only investigation calls per decision (D22)
+  fault_injection: ""      # "primary_down" forces the fallback path (demos/tests); keep empty
