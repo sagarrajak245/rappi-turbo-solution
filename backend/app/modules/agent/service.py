@@ -10,7 +10,9 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -38,6 +40,11 @@ _EXECUTION_TO_RUN = {
     ExecutionStatus.ESCALATED: RunStatus.ESCALATED,
     ExecutionStatus.NEEDS_HUMAN: RunStatus.NEEDS_HUMAN,
 }
+
+
+@dataclass
+class _Progress:
+    erp_touched: bool = False  # the ERP may hold a PO from here on
 
 
 def _utcnow() -> datetime:
@@ -136,21 +143,28 @@ class AgentService:
             return
         async with self._sm() as session:
             now = self._clock()
-            await repo.update_run(
+            written = await repo.update_run(
                 session,
                 run_id,
                 now,
+                expected=RunStatus.RUNNING,  # another worker may have finished it meanwhile
                 status=RunStatus.AWAITING_APPROVAL,
                 proposal=proposal.model_dump(mode="json"),
                 error=None,
             )
-            repo.add_llm_calls(session, run_id, state.get("llm_records", []), now)
+            if written:
+                repo.add_llm_calls(session, run_id, state.get("llm_records", []), now)
             await session.commit()
 
     async def _fail(self, run_id: str, reason: str) -> None:
         async with self._sm() as session:
             await repo.update_run(
-                session, run_id, self._clock(), status=RunStatus.FAILED, error=reason
+                session,
+                run_id,
+                self._clock(),
+                expected=RunStatus.RUNNING,
+                status=RunStatus.FAILED,
+                error=reason,
             )
             await session.commit()
 
@@ -166,8 +180,21 @@ class AgentService:
         await self.drain()
 
     async def recover(self) -> int:
-        """Re-run rows a restart left `running` (safe: nothing before the gate has effects)."""
+        """Re-run rows a restart left `running` (safe: nothing before the gate has effects).
+
+        Rows left `executing` may hold a PO in the ERP, so a human checks them instead.
+        """
         async with self._sm() as session:
+            for run_id in await repo.list_run_ids_by_status(session, RunStatus.EXECUTING):
+                await repo.update_run(
+                    session,
+                    run_id,
+                    self._clock(),
+                    expected=RunStatus.EXECUTING,
+                    status=RunStatus.NEEDS_HUMAN,
+                    error="interrupted during ERP execution; check the ERP before acting",
+                )
+            await session.commit()
             ids = await repo.list_run_ids_by_status(session, RunStatus.RUNNING)
             rows = [await repo.get_run(session, run_id) for run_id in ids]
         for row in rows:
@@ -194,26 +221,29 @@ class AgentService:
             await session.commit()
         if not claimed:
             raise Conflict(f"Run {run_id} is not waiting for a decision", {"run_id": run_id})
+        progress = _Progress()
         try:
-            await self._apply(run_id, human)
-        except Exception as exc:
-            # ERP calls are idempotent per run and re-plan, so the buyer can safely retry.
-            await self._release(run_id, f"{type(exc).__name__}: {exc}")
+            await self._apply(run_id, human, progress)
+        except BaseException as exc:  # cancellation too: never leave the run `executing`
+            await asyncio.shield(self._release(run_id, progress, f"{type(exc).__name__}: {exc}"))
             raise
         return await self.get_run(run_id)
 
-    async def _release(self, run_id: str, error: str) -> None:
+    async def _release(self, run_id: str, progress: "_Progress", error: str) -> None:
+        """Before the ERP was touched the buyer may simply retry; after, a human must check it."""
+        status = RunStatus.NEEDS_HUMAN if progress.erp_touched else RunStatus.AWAITING_APPROVAL
         async with self._sm() as session:
             await repo.update_run(
                 session,
                 run_id,
                 self._clock(),
-                status=RunStatus.AWAITING_APPROVAL,
+                expected=RunStatus.EXECUTING,
+                status=status,
                 error=error,
             )
             await session.commit()
 
-    async def _apply(self, run_id: str, human: HumanDecision) -> None:
+    async def _apply(self, run_id: str, human: HumanDecision, progress: "_Progress") -> None:
         now = self._clock()
         decision = human.model_dump(mode="json")
         async with self._sm() as session:
@@ -285,8 +315,9 @@ class AgentService:
                 eta=now.date() + timedelta(days=inp.lead_time_days),
                 replans_done=row.replans_done,
             )
+            progress.erp_touched = True
             result = await execution.execute(session, order, now.date(), now, self._s)
-            values: dict[str, object] = {
+            values: dict[str, Any] = {
                 "decision": decision,
                 "execution": result.model_dump(mode="json"),
                 "error": None,
@@ -319,7 +350,7 @@ class AgentService:
         inp: PlanningInput,
         result: ExecutionResult,
         now: datetime,
-    ) -> dict[str, object]:
+    ) -> dict[str, Any]:
         """The ERP changed material terms: re-propose at its terms and wait for the buyer again."""
         assert result.replan is not None and result.erp_number is not None
         po = await erp.get(session, result.erp_number)

@@ -35,10 +35,19 @@ async def claim(
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
-async def update_run(session: AsyncSession, run_id: str, now: datetime, **values: Any) -> None:
-    await session.execute(
-        update(AgentRun).where(AgentRun.id == run_id).values(updated_at=now, **values)
-    )
+async def update_run(
+    session: AsyncSession,
+    run_id: str,
+    now: datetime,
+    expected: RunStatus | None = None,
+    **values: Any,
+) -> bool:
+    """Write the run; with `expected`, only while it still has that status (compare-and-set)."""
+    stmt = update(AgentRun).where(AgentRun.id == run_id)
+    if expected is not None:
+        stmt = stmt.where(AgentRun.status == expected)
+    result = await session.execute(stmt.values(updated_at=now, **values))
+    return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
 def add_llm_calls(
