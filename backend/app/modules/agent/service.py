@@ -75,6 +75,7 @@ def _out(row: AgentRun) -> RunOut:
         status=row.status,
         proposal=ProposalOut.model_validate(row.proposal) if row.proposal else None,
         execution=ExecutionResult.model_validate(row.execution) if row.execution else None,
+        decision=HumanDecision.model_validate(row.decision) if row.decision else None,
         replans_done=row.replans_done,
         error=row.error,
     )
@@ -319,7 +320,7 @@ class AgentService:
             p = ProposalOut.model_validate(row.proposal)
 
             if human.action is HumanAction.REJECT:
-                self._learn(session, row, human, now)
+                self._learn(session, row, p, human, now)
                 await repo.update_run(
                     session,
                     run_id,
@@ -360,7 +361,7 @@ class AgentService:
                     await session.commit()
                     return
                 qty = human.qty
-                self._learn(session, row, human, now)
+                self._learn(session, row, p, human, now)
             elif not (p.valid and p.outcome is Outcome.PROPOSE and p.qty):
                 # Nothing orderable was proposed (escalation, no-buy): approving acknowledges it.
                 await repo.update_run(
@@ -402,6 +403,7 @@ class AgentService:
             result = await execution.execute(session, order, now.date(), now, self._s)
             values: dict[str, Any] = {
                 "decision": decision,
+                **self._with_buyer_line(p, inp, qty),
                 "execution": result.model_dump(mode="json"),
                 "error": None,
                 **by,
@@ -413,11 +415,35 @@ class AgentService:
             await repo.update_run(session, run_id, now, **values)
             await session.commit()
 
+    def _with_buyer_line(self, p: ProposalOut, inp: PlanningInput, qty: int) -> dict[str, Any]:
+        """A changed quantity gets its own line on the chart; the agent's line stays as it was."""
+        if p.projection is None or qty == p.qty:
+            return {}
+        days = len(p.projection.agent.stock) - 1
+        calc = planning.calculate(inp, self._s.planning)
+        buyer = planning.project_stock(inp, calc, qty, days=days, buyer_qty=qty).buyer
+        proposal = p.model_copy(
+            update={"projection": p.projection.model_copy(update={"buyer": buyer})}
+        )
+        return {"proposal": proposal.model_dump(mode="json")}
+
     @staticmethod
-    def _learn(session: AsyncSession, row: AgentRun, human: HumanDecision, now: datetime) -> None:
-        """A reasoned REJECT or MODIFY becomes a pending lesson for the buyer to confirm (D25)."""
-        if human.reason and human.reason.strip():
-            memory.record_feedback(session, row.id, row.sku, row.node_code, human.reason, now)
+    def _learn(
+        session: AsyncSession, row: AgentRun, p: ProposalOut, human: HumanDecision, now: datetime
+    ) -> None:
+        """A reasoned REJECT or MODIFY becomes a pending lesson for the buyer to confirm (D25).
+
+        The text records what the buyer did as well as why, so the next prompt has the context.
+        """
+        if not (human.reason and human.reason.strip()):
+            return
+        proposed = f"the proposed {p.qty}" if p.qty else "the proposal"
+        if human.action is HumanAction.MODIFY:
+            done = f"Buyer changed {proposed} to {human.qty}."
+        else:
+            done = f"Buyer rejected {proposed}."
+        text = f"{done} Reason: {human.reason.strip()}"
+        memory.record_feedback(session, row.id, row.sku, row.node_code, text, now)
 
     def _check_modify(self, human: HumanDecision, inp: PlanningInput, now: datetime) -> str | None:
         if human.qty is None:
