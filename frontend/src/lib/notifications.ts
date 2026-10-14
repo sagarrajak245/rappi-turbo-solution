@@ -1,6 +1,6 @@
 export interface Notif {
   id: number;
-  user_id: number;
+  user_id: string | null;
   kind: string;
   run_id: string | null;
   message: string;

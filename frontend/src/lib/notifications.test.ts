@@ -3,7 +3,7 @@ import { notificationsReducer, unreadCount, type Notif } from "./notifications";
 
 const n = (id: number, read_at: string | null = null): Notif => ({
   id,
-  user_id: 1,
+  user_id: "u1",
   kind: "run_ready",
   run_id: "r1",
   message: "m",
