@@ -4,9 +4,10 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.execution.schemas import ExecutionResult
 from app.modules.planning.schemas import Flag, ResolutionOption
 from app.modules.validation.schemas import ProposedDecision, SoftOverride
-from app.shared.enums import Outcome, Verdict
+from app.shared.enums import Outcome, RunStatus, Verdict
 
 
 class DecisionOut(BaseModel):
@@ -90,8 +91,13 @@ class HumanDecision(_Frozen):
 
 
 class RunOut(_Frozen):
-    thread_id: str
-    status: str  # approved | modified | rejected | acknowledged | invalid_modification
-    verdict: Verdict | None
-    qty: int | None
-    issues: list[str] = []
+    """One run as stored: the proposal waits here for the buyer, then the ERP outcome."""
+
+    id: str
+    sku: str
+    node: str
+    status: RunStatus
+    proposal: ProposalOut | None = None
+    execution: ExecutionResult | None = None
+    replans_done: int = 0
+    error: str | None = None  # why it failed, or why the last decision was not accepted

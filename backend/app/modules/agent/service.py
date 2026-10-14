@@ -1,68 +1,70 @@
-"""Public surface of the agent module: start a run to the human gate, then resume it.
+"""Public surface of the agent module: a run is a persisted record (KB §3.2).
 
-The graph is compiled once per service with an in-memory checkpointer (thread_id = run id).
-A durable Postgres/SQLite checkpointer and the agent_runs table arrive in Session B2.
+start_run inserts a `running` row and decides in a background task under a whole-run deadline;
+the proposal then waits in the row for the buyer. decide() executes an approval in the ERP,
+reading the re-plan count and the ERP's changed terms from the row, never from the client.
+Nothing before the gate has side effects, so recover() simply re-runs rows left `running`.
 """
 
+import asyncio
+import logging
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.errors import Conflict, NotFound
-from app.modules.agent.graph import GraphDeps, build_graph
-from app.modules.agent.llm.base import LlmCallRecord, LlmClient
-from app.modules.agent.schemas import DecisionOut, HumanDecision, ProposalOut, RunOut
+from app.modules.agent import repository as repo
+from app.modules.agent.graph import GraphDeps, build_graph, human_verdict, validation_feedback
+from app.modules.agent.llm.base import LlmClient
+from app.modules.agent.models import AgentRun
+from app.modules.agent.schemas import HumanAction, HumanDecision, ProposalOut, RunOut
 from app.modules.agent.state import AgentState
-from app.modules.planning.schemas import (
-    CalcResult,
-    Flag,
-    InboundPo,
-    PlanningInput,
-    ResolutionOption,
-    Violation,
-)
-from app.modules.validation.schemas import (
-    ProposedDecision,
-    SoftBreach,
-    SoftOverride,
-    ValidationResult,
-)
-from app.shared.enums import ConstraintCode, FlagCode, FlagSeverity, Outcome, Verdict
+from app.modules.erp_mock import service as erp
+from app.modules.execution import service as execution
+from app.modules.execution.schemas import ApprovedOrder, ExecutionResult, ExecutionStatus
+from app.modules.planning import service as planning
+from app.modules.planning.schemas import PlanningInput
+from app.modules.validation import service as validation
+from app.modules.validation.schemas import ProposedDecision
+from app.shared.enums import Outcome, RunStatus
 
-# Types the checkpointer may revive from state. Explicit, because LangGraph will refuse
-# unregistered types in a future version (and warns on every load until then).
-_STATE_TYPES: tuple[type, ...] = (
-    LlmCallRecord,
-    DecisionOut,
-    ProposalOut,
-    RunOut,
-    PlanningInput,
-    InboundPo,
-    Flag,
-    Violation,
-    ResolutionOption,
-    CalcResult,
-    ProposedDecision,
-    SoftOverride,
-    SoftBreach,
-    ValidationResult,
-    Verdict,
-    Outcome,
-    FlagSeverity,
-    FlagCode,
-    ConstraintCode,
-)
+logger = logging.getLogger(__name__)
+
+_EXECUTION_TO_RUN = {
+    ExecutionStatus.COMPLETED: RunStatus.COMPLETED,
+    ExecutionStatus.ESCALATED: RunStatus.ESCALATED,
+    ExecutionStatus.NEEDS_HUMAN: RunStatus.NEEDS_HUMAN,
+}
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _out(row: AgentRun) -> RunOut:
+    return RunOut(
+        id=row.id,
+        sku=row.sku,
+        node=row.node_code,
+        status=row.status,
+        proposal=ProposalOut.model_validate(row.proposal) if row.proposal else None,
+        execution=ExecutionResult.model_validate(row.execution) if row.execution else None,
+        replans_done=row.replans_done,
+        error=row.error,
+    )
+
+
+def _with_erp_terms(inp: PlanningInput, row: AgentRun) -> PlanningInput:
+    """Planning input as the supplier now quotes it, after a re-plan."""
+    update: dict[str, object] = {}
+    if row.unit_price_override is not None:
+        update["unit_cost_inr"] = row.unit_price_override
+    if row.case_pack_override is not None:
+        update["case_pack"] = row.case_pack_override
+    return inp.model_copy(update=update) if update else inp
 
 
 class AgentService:
@@ -74,43 +76,278 @@ class AgentService:
         settings: Settings,
         clock: Callable[[], datetime] = _utcnow,
     ) -> None:
-        deps = GraphDeps(sessionmaker, decide_llm, review_llm, settings)
-        self._graph = build_graph(
-            deps, InMemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=_STATE_TYPES))
-        )
+        self._sm = sessionmaker
+        self._graph = build_graph(GraphDeps(sessionmaker, decide_llm, review_llm, settings))
+        self._s = settings
         self._clock = clock
+        self._tasks: set[asyncio.Task[None]] = set()  # in-process worker; strong refs
 
-    @staticmethod
-    def _config(thread_id: str) -> RunnableConfig:
-        return {"configurable": {"thread_id": thread_id}}
+    # ---- deciding (background) ------------------------------------------------------------
 
-    async def start_run(self, sku: str, node: str) -> ProposalOut:
-        """Run the graph for one SKU x node until it stops at the human gate."""
-        thread_id = uuid.uuid4().hex
+    async def start_run(self, sku: str, node: str) -> RunOut:
+        """Persist a `running` run and decide in the background; poll get_run for the result."""
+        now = self._clock()
+        row = AgentRun(
+            id=uuid.uuid4().hex,
+            sku=sku,
+            node_code=node,
+            status=RunStatus.RUNNING,
+            replans_done=0,
+            created_at=now,
+            updated_at=now,
+        )
+        async with self._sm() as session:
+            session.add(row)
+            await session.commit()
+            out = _out(row)
+        self._schedule(out.id, sku, node)
+        return out
+
+    async def propose(self, run_id: str, sku: str, node: str) -> tuple[ProposalOut, AgentState]:
+        """Run the graph to its proposal. No side effects, so it is safe to re-run."""
         now = self._clock()
         state: AgentState = {
-            "thread_id": thread_id,
+            "thread_id": run_id,
             "sku": sku,
             "node": node,
             "today": now.date(),
             "now": now,
         }
-        config = self._config(thread_id)
-        await self._graph.ainvoke(state, config)
-        snapshot = await self._graph.aget_state(config)
-        proposal: ProposalOut = snapshot.values["proposal"]
-        return proposal
+        final: AgentState = await self._graph.ainvoke(state)  # type: ignore[assignment]
+        return final["proposal"], final
 
-    async def resume_run(self, thread_id: str, decision: HumanDecision) -> RunOut:
-        """Feed the buyer's decision into the waiting human gate."""
-        config = self._config(thread_id)
-        snapshot = await self._graph.aget_state(config)
-        if not snapshot.values:
-            raise NotFound(f"Run {thread_id} not found", {"thread_id": thread_id})
-        if not snapshot.next:
-            raise Conflict(
-                f"Run {thread_id} is not waiting for a decision", {"thread_id": thread_id}
+    def _schedule(self, run_id: str, sku: str, node: str) -> None:
+        task = asyncio.create_task(self._decide_in_background(run_id, sku, node))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _decide_in_background(self, run_id: str, sku: str, node: str) -> None:
+        try:
+            async with asyncio.timeout(self._s.llm.run_deadline_s):
+                proposal, state = await self.propose(run_id, sku, node)
+        except asyncio.CancelledError:
+            raise  # shutdown: the row stays `running` and recover() re-runs it
+        except TimeoutError:
+            await self._fail(run_id, f"run exceeded its {self._s.llm.run_deadline_s}s deadline")
+            return
+        except Exception as exc:
+            logger.exception("agent run failed", extra={"run_id": run_id})
+            await self._fail(run_id, f"{type(exc).__name__}: {exc}")
+            return
+        async with self._sm() as session:
+            now = self._clock()
+            await repo.update_run(
+                session,
+                run_id,
+                now,
+                status=RunStatus.AWAITING_APPROVAL,
+                proposal=proposal.model_dump(mode="json"),
+                error=None,
             )
-        await self._graph.ainvoke(Command(resume=decision.model_dump(mode="json")), config)
-        run: RunOut = (await self._graph.aget_state(config)).values["run"]
-        return run
+            repo.add_llm_calls(session, run_id, state.get("llm_records", []), now)
+            await session.commit()
+
+    async def _fail(self, run_id: str, reason: str) -> None:
+        async with self._sm() as session:
+            await repo.update_run(
+                session, run_id, self._clock(), status=RunStatus.FAILED, error=reason
+            )
+            await session.commit()
+
+    async def drain(self) -> None:
+        """Wait for every background run (tests, graceful shutdown)."""
+        while self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+
+    async def shutdown(self) -> None:
+        """Stop background runs; their rows stay `running` for recover() on the next start."""
+        for task in self._tasks:
+            task.cancel()
+        await self.drain()
+
+    async def recover(self) -> int:
+        """Re-run rows a restart left `running` (safe: nothing before the gate has effects)."""
+        async with self._sm() as session:
+            ids = await repo.list_run_ids_by_status(session, RunStatus.RUNNING)
+            rows = [await repo.get_run(session, run_id) for run_id in ids]
+        for row in rows:
+            if row is not None:
+                self._schedule(row.id, row.sku, row.node_code)
+        return len(rows)
+
+    # ---- the buyer's decision -------------------------------------------------------------
+
+    async def get_run(self, run_id: str) -> RunOut:
+        async with self._sm() as session:
+            row = await repo.get_run(session, run_id)
+            if row is None:
+                raise NotFound(f"Run {run_id} not found", {"run_id": run_id})
+            return _out(row)
+
+    async def decide(self, run_id: str, human: HumanDecision) -> RunOut:
+        """Apply the buyer's decision. Only a run awaiting approval accepts one (else 409)."""
+        await self.get_run(run_id)  # 404 before 409
+        async with self._sm() as session:
+            claimed = await repo.claim(
+                session, run_id, RunStatus.AWAITING_APPROVAL, RunStatus.EXECUTING, self._clock()
+            )
+            await session.commit()
+        if not claimed:
+            raise Conflict(f"Run {run_id} is not waiting for a decision", {"run_id": run_id})
+        try:
+            await self._apply(run_id, human)
+        except Exception as exc:
+            # ERP calls are idempotent per run and re-plan, so the buyer can safely retry.
+            await self._release(run_id, f"{type(exc).__name__}: {exc}")
+            raise
+        return await self.get_run(run_id)
+
+    async def _release(self, run_id: str, error: str) -> None:
+        async with self._sm() as session:
+            await repo.update_run(
+                session,
+                run_id,
+                self._clock(),
+                status=RunStatus.AWAITING_APPROVAL,
+                error=error,
+            )
+            await session.commit()
+
+    async def _apply(self, run_id: str, human: HumanDecision) -> None:
+        now = self._clock()
+        decision = human.model_dump(mode="json")
+        async with self._sm() as session:
+            row = await repo.get_run(session, run_id)
+            assert row is not None  # claimed above
+            p = ProposalOut.model_validate(row.proposal)
+
+            if human.action is HumanAction.REJECT:
+                await repo.update_run(
+                    session, run_id, now, status=RunStatus.REJECTED, decision=decision, error=None
+                )
+                await session.commit()
+                return
+            if human.action is HumanAction.ACKNOWLEDGE:
+                await repo.update_run(
+                    session,
+                    run_id,
+                    now,
+                    status=RunStatus.ACKNOWLEDGED,
+                    decision=decision,
+                    error=None,
+                )
+                await session.commit()
+                return
+
+            inp = _with_erp_terms(
+                await planning.load_planning_input(
+                    session, row.sku, row.node_code, now.date(), settings=self._s.planning
+                ),
+                row,
+            )
+            qty = p.qty
+            if human.action is HumanAction.MODIFY:
+                error = self._check_modify(human, inp, now)
+                if error:
+                    await repo.update_run(
+                        session, run_id, now, status=RunStatus.AWAITING_APPROVAL, error=error
+                    )
+                    await session.commit()
+                    return
+                qty = human.qty
+            elif not (p.valid and p.outcome is Outcome.PROPOSE and p.qty):
+                # Nothing orderable was proposed (escalation, no-buy): approving acknowledges it.
+                await repo.update_run(
+                    session,
+                    run_id,
+                    now,
+                    status=RunStatus.ACKNOWLEDGED,
+                    decision=decision,
+                    error=None,
+                )
+                await session.commit()
+                return
+            if not qty:  # a MODIFY to 0 is a valid no-buy
+                await repo.update_run(
+                    session, run_id, now, status=RunStatus.REJECTED, decision=decision, error=None
+                )
+                await session.commit()
+                return
+
+            order = ApprovedOrder(
+                proposal_id=run_id,
+                node_code=row.node_code,
+                sku=row.sku,
+                supplier_code=inp.supplier_code,
+                qty=qty,
+                case_pack=inp.case_pack,
+                unit_price_inr=inp.unit_cost_inr,
+                eta=now.date() + timedelta(days=inp.lead_time_days),
+                replans_done=row.replans_done,
+            )
+            result = await execution.execute(session, order, now.date(), now, self._s)
+            values: dict[str, object] = {
+                "decision": decision,
+                "execution": result.model_dump(mode="json"),
+                "error": None,
+            }
+            if result.status is ExecutionStatus.REPLAN_REQUIRED:
+                values |= await self._replanned(session, row, p, inp, result, now)
+            else:
+                values["status"] = _EXECUTION_TO_RUN[result.status]
+            await repo.update_run(session, run_id, now, **values)
+            await session.commit()
+
+    def _check_modify(self, human: HumanDecision, inp: PlanningInput, now: datetime) -> str | None:
+        if human.qty is None:
+            return "modify needs a quantity"
+        calc = planning.calculate(inp, self._s.planning)
+        flags = validation.check_data_quality(inp, now, self._s.data_quality)
+        proposed = ProposedDecision(
+            verdict=human_verdict(human.qty, inp.rec_qty),
+            qty=human.qty,
+            deviation_reason=human.reason,
+        )
+        v = validation.validate(proposed, inp, calc, tuple(flags), self._s.planning)
+        return None if v.valid else "; ".join(validation_feedback(v))
+
+    async def _replanned(
+        self,
+        session: AsyncSession,
+        row: AgentRun,
+        p: ProposalOut,
+        inp: PlanningInput,
+        result: ExecutionResult,
+        now: datetime,
+    ) -> dict[str, object]:
+        """The ERP changed material terms: re-propose at its terms and wait for the buyer again."""
+        assert result.replan is not None and result.erp_number is not None
+        po = await erp.get(session, result.erp_number)
+        terms = {"unit_cost_inr": po.unit_price_inr, "case_pack": po.case_pack}
+        changed = inp.model_copy(update=terms)
+        calc = result.replan
+        flags = validation.check_data_quality(changed, now, self._s.data_quality)
+        v = validation.validate(
+            validation.baseline_decision(calc), changed, calc, tuple(flags), self._s.planning
+        )
+        proposal = p.model_copy(
+            update={
+                "baseline_qty": calc.qty,
+                "verdict": v.verdict,
+                "qty": v.qty,
+                "outcome": v.outcome,
+                "valid": v.valid,
+                "reasons": [*result.notes],
+                "deviation_reason": None,
+                "flags": list(v.flags),
+                "issues": list(v.issues) + [x.message for x in v.violations],
+                "suggestions": list(v.suggestions),
+            }
+        )
+        return {
+            "status": RunStatus.AWAITING_APPROVAL,
+            "proposal": proposal.model_dump(mode="json"),
+            "replans_done": row.replans_done + 1,
+            "unit_price_override": po.unit_price_inr,
+            "case_pack_override": po.case_pack,
+        }
