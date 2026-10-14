@@ -7,8 +7,10 @@ unless a caller (e.g. a test) sets ``sqlalchemy.url`` on the Alembic config expl
 import asyncio
 from logging.config import fileConfig
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.engine import Connection
+from sqlalchemy.types import TypeDecorator
 
 from alembic import context
 from app.core.config import get_settings
@@ -20,6 +22,16 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+
+def _render_item(type_: str, obj: Any, autogen_context: Any) -> str | bool:
+    """Render our TypeDecorators (Money, UTCDateTime) as their plain SQL type.
+
+    Migrations then never import app code, so old revisions keep working when models change.
+    """
+    if type_ == "type" and isinstance(obj, TypeDecorator):
+        return f"sa.{obj.impl!r}"
+    return False
 
 
 def _db_config() -> DbConfig:
@@ -37,6 +49,7 @@ def _configure(connection: Connection | None, url: str | None, is_sqlite: bool) 
         target_metadata=target_metadata,
         render_as_batch=is_sqlite,  # SQLite cannot ALTER most things; batch mode recreates tables
         compare_type=True,
+        render_item=_render_item,
         literal_binds=connection is None,
     )
 
