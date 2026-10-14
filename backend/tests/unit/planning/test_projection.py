@@ -56,3 +56,13 @@ def test_defaults_to_14_days_and_no_ceiling_without_a_zone() -> None:
     assert len(proj.agent.stock) == 15
     assert proj.storage_ceiling is None
     assert proj.agent.stock == proj.no_order.stock
+
+
+def test_stock_arriving_today_counts_on_day_zero() -> None:
+    # The calculator treats eta_offset 0 inbound as usable; a same-day order is on the shelf too.
+    inp = INP.model_copy(
+        update={"inbound": (InboundPo(po_number="PO0", qty=30, eta_offset=0),), "lead_time_days": 0}
+    )
+    proj = project_stock(inp, calculate(inp, get_settings().planning), 60, days=2)
+    assert proj.no_order.stock == (120, 100, 80)
+    assert proj.agent.stock == (180, 160, 140)
