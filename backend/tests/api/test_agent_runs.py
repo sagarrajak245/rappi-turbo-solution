@@ -1,4 +1,4 @@
-"""HTTP surface of the agent: start a run to the human gate, then resume it with a decision.
+"""HTTP surface of the agent: start a run (202), poll it, then send the buyer's decision.
 
 The real graph runs over a seeded database; the LLMs are scripted, so no network is used.
 """
@@ -29,49 +29,58 @@ ACCEPT_800: dict[str, Any] = {
 
 
 @pytest.fixture
-async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
+async def svc(sessionmaker: async_sessionmaker[AsyncSession]) -> AgentService:
     async with sessionmaker() as s:
         await seed_scenario1(s, today=TODAY, now=NOW)
-    svc = AgentService(
+    return AgentService(
         sessionmaker,
         ScriptedLlm([ACCEPT_800]),
         ScriptedLlm([{"ok": True, "issues": []}]),
         get_settings(),
         clock=lambda: NOW,
     )
+
+
+@pytest.fixture
+async def client(svc: AgentService) -> AsyncIterator[AsyncClient]:
     app = create_app()
     app.dependency_overrides[get_agent_service] = lambda: svc
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
 
-async def test_start_then_approve(client: AsyncClient) -> None:
+async def _proposed(client: AsyncClient, svc: AgentService) -> str:
     started = await client.post("/agent/runs", json={"sku": "COKE-750", "node": "BANDRA"})
-    assert started.status_code == 200
-    proposal = started.json()
-    assert proposal["verdict"] == "ACCEPT"
-    assert proposal["qty"] == 800
-
-    resumed = await client.post(
-        f"/agent/runs/{proposal['thread_id']}/resume", json={"action": "approve"}
-    )
-    assert resumed.status_code == 200
-    assert resumed.json()["status"] == "approved"
-    assert resumed.json()["qty"] == 800
+    assert started.status_code == 202
+    assert started.json()["status"] == "running"
+    await svc.drain()
+    return str(started.json()["id"])
 
 
-async def test_resume_twice_is_conflict(client: AsyncClient) -> None:
-    started = await client.post("/agent/runs", json={"sku": "COKE-750", "node": "BANDRA"})
-    url = f"/agent/runs/{started.json()['thread_id']}/resume"
-    await client.post(url, json={"action": "approve"})
+async def test_start_poll_then_approve(client: AsyncClient, svc: AgentService) -> None:
+    run_id = await _proposed(client, svc)
+    run = (await client.get(f"/agent/runs/{run_id}")).json()
+    assert run["status"] == "awaiting_approval"
+    assert (run["proposal"]["verdict"], run["proposal"]["qty"]) == ("ACCEPT", 800)
+
+    done = await client.post(f"/agent/runs/{run_id}/decision", json={"action": "approve"})
+    assert done.status_code == 200
+    assert done.json()["status"] == "completed"
+    assert done.json()["execution"]["final_status"] == "submitted"
+
+
+async def test_second_decision_is_conflict(client: AsyncClient, svc: AgentService) -> None:
+    url = f"/agent/runs/{await _proposed(client, svc)}/decision"
+    await client.post(url, json={"action": "reject", "reason": "not now"})
     again = await client.post(url, json={"action": "approve"})
     assert again.status_code == 409
 
 
-async def test_resume_unknown_run_is_not_found(client: AsyncClient) -> None:
-    r = await client.post("/agent/runs/nope/resume", json={"action": "approve"})
+async def test_unknown_run_is_not_found(client: AsyncClient) -> None:
+    r = await client.post("/agent/runs/nope/decision", json={"action": "approve"})
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "not_found"
+    assert (await client.get("/agent/runs/nope")).status_code == 404
 
 
 async def test_empty_sku_is_rejected(client: AsyncClient) -> None:

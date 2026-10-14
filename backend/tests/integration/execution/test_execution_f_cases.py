@@ -6,7 +6,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.modules.erp_mock import service as erp
 from app.modules.erp_mock.models import ErpPurchaseOrder
+from app.modules.erp_mock.schemas import ErpDraftRequest
 from app.modules.execution import service
 from app.modules.execution.schemas import ApprovedOrder, ExecutionResult, ExecutionStatus
 from app.scenarios.inputs import planning_input_from_case
@@ -127,3 +129,26 @@ async def test_replanned_order_reuses_proposal_id_as_a_new_erp_request(
     second = await service.execute(session, replanned, TODAY, NOW, get_settings())
     assert second.erp_number != first.erp_number
     assert await po_count(session) == 2
+
+
+async def test_retry_of_an_externally_cancelled_draft_escalates(session: AsyncSession) -> None:
+    await seed_scenario1(session, today=TODAY, now=NOW)
+    order = order_for("C1")
+    draft = await erp.create_draft(
+        session,
+        f"{order.proposal_id}:r0:create",
+        ErpDraftRequest(
+            node_code=order.node_code,
+            sku=order.sku,
+            supplier_code=order.supplier_code,
+            qty=order.qty,
+            case_pack=order.case_pack,
+            unit_price_inr=order.unit_price_inr,
+            eta=order.eta,
+        ),
+        NOW,
+    )
+    await erp.cancel(session, draft.erp_number, "someone-else:cancel", NOW)
+    result = await service.execute(session, order, TODAY, NOW, get_settings())
+    assert result.status is ExecutionStatus.ESCALATED
+    assert result.final_status is ErpPoStatus.CANCELLED
