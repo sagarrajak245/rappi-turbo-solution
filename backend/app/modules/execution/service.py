@@ -40,7 +40,8 @@ class _Ctx:
         self.notes: list[str] = []
 
     def key(self, op: str) -> str:
-        return f"{self.order.proposal_id}:{op}"
+        # A re-planned order is a new ERP request under the same proposal.
+        return f"{self.order.proposal_id}:r{self.order.replans_done}:{op}"
 
     def result(
         self,
@@ -128,6 +129,18 @@ async def _late_arrival_flags(ctx: _Ctx, po: ErpPurchaseOrderOut) -> tuple[FlagC
     return tuple(f.code for f in calc.flags if f.code is FlagCode.STOCKOUT_BEFORE_ARRIVAL)
 
 
+def _already_submitted(ctx: _Ctx, po: ErpPurchaseOrderOut) -> ExecutionResult:
+    """A retried order whose PO is already submitted: report, never cancel automatically."""
+    devs = tuple(compare(ctx.order, po, ctx.s.erp))
+    ctx.notes.append(f"{po.erp_number} was already submitted")
+    if any(d.severity is not Severity.MINOR for d in devs):
+        ctx.notes.append(
+            "Submitted PO differs from the approval; cancel or amend needs human approval"
+        )
+        return ctx.result(ExecutionStatus.NEEDS_HUMAN, po, deviations=devs)
+    return ctx.result(ExecutionStatus.COMPLETED, po, deviations=devs)
+
+
 async def execute(
     session: AsyncSession, order: ApprovedOrder, today: date, now: datetime, settings: Settings
 ) -> ExecutionResult:
@@ -138,6 +151,8 @@ async def execute(
         return ctx.result(ExecutionStatus.ESCALATED, draft)
 
     draft = await erp.get(session, draft.erp_number)  # re-read, never trust the write response
+    if draft.status is ErpPoStatus.SUBMITTED:
+        return _already_submitted(ctx, draft)
     devs = compare(order, draft, settings.erp)
     worst = max((d.severity for d in devs), key=_RANK.__getitem__, default=None)
     if worst in DRAFT_HANDLERS:
