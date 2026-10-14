@@ -8,6 +8,24 @@ Built for the Rappi "AI Purchasing Agent" assignment. **Scenario 1 (Purchase Rec
 is implemented end to end**: backend, agent, mock ERP, feedback loop, learning, UI and evaluation.
 The setting is a Mumbai quick-commerce branch with five dark stores, and money is in INR.
 
+## Live demo
+
+**https://rappi-web.onrender.com**
+
+| User | Email | Sees |
+|---|---|---|
+| Buyer | `sagar@rappi.test` | Home, Inbox, Review, Purchase orders, Memory |
+| Admin | `admin@rappi.test` | Everything above, plus Admin metrics and Evaluation |
+
+Passwords are shared in the submission email, not in this repository.
+
+- It runs on Render's free plan and sleeps when idle, so **the first load can take about a minute**.
+- Stock snapshots older than 24 hours are flagged stale by design. If every case answers
+  INVESTIGATE, the demo data needs a re-seed (`python -m app.seed scenario1`).
+- To check a specific case, see [Testing each case in the UI](#testing-each-case-in-the-ui). It
+  lists every case's Inbox row and the result to expect.
+
+- [Live demo](#live-demo)
 - [Assignment checklist](#assignment-checklist)
 - [What the agent does](#what-the-agent-does)
 - [Agent behaviour: answers to the brief](#agent-behaviour-answers-to-the-brief)
