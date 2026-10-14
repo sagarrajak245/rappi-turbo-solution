@@ -31,3 +31,6 @@ out/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Playwright MCP session output
+.playwright-mcp/
