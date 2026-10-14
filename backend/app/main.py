@@ -17,7 +17,9 @@ from app.modules.agent.llm.factory import build_llm
 from app.modules.agent.router import router as agent_router
 from app.modules.agent.service import AgentService
 from app.modules.erp_mock.router import router as erp_router
+from app.modules.evaluation.router import router as evaluation_router
 from app.modules.execution.router import router as execution_router
+from app.modules.observability.router import router as observability_router
 
 logger = logging.getLogger(__name__)
 
@@ -54,4 +56,6 @@ def create_app() -> FastAPI:
     app.include_router(erp_router)
     app.include_router(execution_router)
     app.include_router(agent_router)
+    app.include_router(observability_router)
+    app.include_router(evaluation_router)
     return app

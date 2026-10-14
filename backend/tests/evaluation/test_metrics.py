@@ -16,7 +16,13 @@ NOW = datetime(2026, 10, 14, 6, 0, tzinfo=UTC)
 
 def _run(rid: str, status: RunStatus) -> AgentRun:
     return AgentRun(
-        id=rid, sku="S", node_code="N", status=status, replans_done=0, created_at=NOW, updated_at=NOW
+        id=rid,
+        sku="S",
+        node_code="N",
+        status=status,
+        replans_done=0,
+        created_at=NOW,
+        updated_at=NOW,
     )
 
 
@@ -35,7 +41,9 @@ def _call(rid: str, model: str, cost: str, fallback: bool = False) -> LlmCall:
 
 
 @pytest.fixture
-async def seeded(sessionmaker: async_sessionmaker[AsyncSession]) -> async_sessionmaker[AsyncSession]:
+async def seeded(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> async_sessionmaker[AsyncSession]:
     async with sessionmaker() as s:
         s.add_all(
             [
