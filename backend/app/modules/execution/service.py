@@ -153,6 +153,9 @@ async def execute(
     draft = await erp.get(session, draft.erp_number)  # re-read, never trust the write response
     if draft.status is ErpPoStatus.SUBMITTED:
         return _already_submitted(ctx, draft)
+    if draft.status is not ErpPoStatus.DRAFT:
+        ctx.notes.append(f"ERP holds the order as {draft.status}")
+        return ctx.result(ExecutionStatus.ESCALATED, draft)
     devs = compare(order, draft, settings.erp)
     worst = max((d.severity for d in devs), key=_RANK.__getitem__, default=None)
     if worst in DRAFT_HANDLERS:

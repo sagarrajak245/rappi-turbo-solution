@@ -22,6 +22,8 @@ def _fire(po: ErpPurchaseOrder, b: ErpBehaviour, reason: str) -> None:
 
 
 def _price_change(po: ErpPurchaseOrder, b: ErpBehaviour) -> bool:
+    if b.times_fired > 0:
+        return False  # the supplier raised the price once; later orders carry the new price
     pct = Decimal(str(b.params["pct"]))
     old = po.unit_price_inr
     po.unit_price_inr = to_inr(old * (1 + pct / 100))
