@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+KNOWLEDGE_BASE.md
 
 # Python
 __pycache__/
