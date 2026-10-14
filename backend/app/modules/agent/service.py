@@ -19,10 +19,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.errors import Conflict, NotFound
 from app.modules.agent import repository as repo
-from app.modules.agent.graph import GraphDeps, build_graph, human_verdict, validation_feedback
+from app.modules.agent.graph import (
+    GraphDeps,
+    build_graph,
+    human_verdict,
+    review_facts,
+    validation_feedback,
+)
 from app.modules.agent.llm.base import LlmClient
 from app.modules.agent.models import AgentRun
-from app.modules.agent.schemas import HumanAction, HumanDecision, ProposalOut, RunOut
+from app.modules.agent.schemas import (
+    HumanAction,
+    HumanDecision,
+    ProposalOut,
+    RunOut,
+    RunSummary,
+)
 from app.modules.agent.state import AgentState
 from app.modules.erp_mock import service as erp
 from app.modules.execution import service as execution
@@ -66,6 +78,33 @@ def _out(row: AgentRun) -> RunOut:
         replans_done=row.replans_done,
         error=row.error,
     )
+
+
+def summarize(row: AgentRun) -> RunSummary:
+    p = row.proposal or {}
+    reasons = p.get("reasons") or []
+    return RunSummary(
+        id=row.id,
+        sku=row.sku,
+        node=row.node_code,
+        status=row.status,
+        verdict=p.get("verdict"),
+        qty=p.get("qty"),
+        rec_qty=p.get("rec_qty"),
+        outcome=p.get("outcome"),
+        reason=reasons[0] if reasons else None,
+        error=row.error,
+        decided_by=row.decided_by,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+async def list_runs(
+    session: AsyncSession, status: RunStatus | None, limit: int
+) -> list[RunSummary]:
+    """Newest first. A plain read: needs no LLM, so it lives outside AgentService."""
+    return [summarize(r) for r in await repo.list_runs(session, status, limit)]
 
 
 def _with_erp_terms(inp: PlanningInput, row: AgentRun) -> PlanningInput:
@@ -424,6 +463,8 @@ class AgentService:
                 "flags": list(v.flags),
                 "issues": list(v.issues) + [x.message for x in v.violations],
                 "suggestions": list(v.suggestions),
+                "facts": review_facts(changed, calc, flags),
+                "projection": planning.project_stock(changed, calc, v.qty or 0),
             }
         )
         return {

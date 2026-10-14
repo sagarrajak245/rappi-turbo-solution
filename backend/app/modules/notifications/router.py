@@ -48,7 +48,8 @@ async def stream(request: Request, user: CurrentUser, svc: Service) -> Streaming
                     yield ": keepalive\n\n"
                     continue
                 if event.get("user_id") in (None, user.id):
-                    yield f"event: {event['kind']}\ndata: {json.dumps(event)}\n\n"
+                    # Unnamed frames reach EventSource.onmessage; the kind travels in the payload.
+                    yield f"data: {json.dumps(event)}\n\n"
         finally:
             svc.broadcaster.unsubscribe(queue)
 
