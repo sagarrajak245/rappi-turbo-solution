@@ -58,6 +58,7 @@ async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterato
         await seed_scenario1(s, today=TODAY, now=NOW)
         s.add_all(
             [
+                _run("stuck", "X-1", "THANE", RunStatus.NEEDS_HUMAN, 0),
                 _run(
                     "old",
                     "COKE-750",
@@ -116,7 +117,7 @@ async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterato
 
 async def test_runs_newest_first_and_filtered(client: AsyncClient) -> None:
     rows = (await client.get("/agent/runs")).json()
-    assert [r["id"] for r in rows] == ["done", "new", "old"]
+    assert [r["id"] for r in rows] == ["done", "new", "old", "stuck"]
     assert {"verdict": "MODIFY", "qty": 600, "reason": "new reason"}.items() <= rows[1].items()
     waiting = (await client.get("/agent/runs", params={"status": "awaiting_approval"})).json()
     assert [r["id"] for r in waiting] == ["new"]
@@ -153,7 +154,8 @@ async def test_purchase_orders_come_from_executed_runs(client: AsyncClient) -> N
 
 async def test_dashboard_summary_for_the_buyer(client: AsyncClient) -> None:
     d = (await client.get("/dashboard/summary")).json()
-    assert d["pending_approvals"] == 1
+    assert d["pending_approvals"] == 1  # only awaiting_approval accepts a decision
+    assert d["needs_attention"] == 1  # needs_human: checked outside the approve flow
     assert Decimal(d["committed_today_inr"]) == Decimal("18000")
     assert d["agreement_pct"] == 50.0  # one approve, one reject
     assert [r["id"] for r in d["needs_decision"]] == ["new"]
