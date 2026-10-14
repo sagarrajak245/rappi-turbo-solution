@@ -49,11 +49,14 @@ def test_x3_soft_override_with_reason_is_valid_and_audited() -> None:
     d = _modify(
         2400,
         deviation_reason="Diwali promo next week",
-        overrides=(SoftOverride(policy="max_cover_days", reason="Diwali promo next week"),),
+        overrides=(
+            SoftOverride(policy="max_cover_days", reason="Diwali promo next week"),
+            SoftOverride(policy="max_deviation_from_rec", reason="Diwali promo next week"),
+        ),
     )
     r = _run("C1", d)
-    assert r.valid, r.issues
-    assert [o.policy for o in r.overrides_applied] == ["max_cover_days"]
+    assert r.valid, (r.issues, r.soft_breaches)
+    assert [o.policy for o in r.overrides_applied] == ["max_cover_days", "max_deviation_from_rec"]
 
 
 def test_soft_breach_without_override_is_invalid() -> None:
