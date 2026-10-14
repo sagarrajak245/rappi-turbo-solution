@@ -5,49 +5,17 @@ the LLM's proposal in Session B. Precedence (KB §7.1a): a blocking flag forces 
 escalate flag forces ESCALATE, otherwise the proposal stands or falls on its own merits.
 """
 
-from pydantic import BaseModel, ConfigDict
-
 from app.core.config import PlanningSettings
-from app.modules.planning.constraints import check_hard, nearest_case_qtys
-from app.modules.planning.schemas import CalcResult, Flag, PlanningInput, Violation
+from app.modules.planning.schemas import CalcResult, Flag, PlanningInput
+from app.modules.planning.service import check_hard, nearest_case_qtys
 from app.modules.validation.policy import HARD, SOFT
+from app.modules.validation.schemas import (
+    ProposedDecision,
+    SoftBreach,
+    SoftOverride,
+    ValidationResult,
+)
 from app.shared.enums import ConstraintCode, FlagSeverity, Outcome, Verdict
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class SoftOverride(_Frozen):
-    policy: str
-    reason: str
-
-
-class ProposedDecision(_Frozen):
-    verdict: Verdict | None
-    qty: int | None
-    outcome: Outcome = Outcome.PROPOSE
-    reasons: tuple[str, ...] = ()
-    deviation_reason: str | None = None  # required when qty differs from the baseline
-    overrides: tuple[SoftOverride, ...] = ()
-
-
-class SoftBreach(_Frozen):
-    policy: str
-    message: str
-
-
-class ValidationResult(_Frozen):
-    valid: bool
-    verdict: Verdict | None  # final, after forced precedence
-    qty: int | None
-    outcome: Outcome
-    violations: tuple[Violation, ...] = ()
-    soft_breaches: tuple[SoftBreach, ...] = ()  # breaches without a valid override
-    overrides_applied: tuple[SoftOverride, ...] = ()
-    issues: tuple[str, ...] = ()
-    suggestions: tuple[int, ...] = ()  # nearest valid quantities, when the case pack is off
-    flags: tuple[Flag, ...] = ()
 
 
 def baseline_decision(calc: CalcResult) -> ProposedDecision:
@@ -116,7 +84,16 @@ def validate(
     if any(v.code is ConstraintCode.CASE_PACK for v in violations) and qty is not None:
         suggestions = nearest_case_qtys(qty, inp)
 
-    overrides = {o.policy: o for o in decision.overrides if o.policy not in HARD and o.reason}
+    overrides: dict[str, SoftOverride] = {}
+    for o in decision.overrides:
+        if o.policy in HARD:
+            issues.append(f"{o.policy} is a hard constraint and cannot be overridden")
+        elif o.policy not in SOFT:
+            issues.append(f"unknown soft policy {o.policy!r}")
+        elif not o.reason.strip():
+            issues.append(f"override of {o.policy} needs a reason")
+        else:
+            overrides[o.policy] = o
     breaches, applied = [], []
     for policy, check in SOFT.items():
         message = check(qty, inp, calc, settings) if qty else None

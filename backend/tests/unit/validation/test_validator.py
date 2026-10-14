@@ -5,12 +5,8 @@ from datetime import UTC, date, datetime
 from app.core.config import PlanningSettings
 from app.modules.planning.calculator import calculate
 from app.modules.planning.schemas import Flag
-from app.modules.validation.validator import (
-    ProposedDecision,
-    SoftOverride,
-    baseline_decision,
-    validate,
-)
+from app.modules.validation.schemas import ProposedDecision, SoftOverride
+from app.modules.validation.service import baseline_decision, validate
 from app.scenarios.inputs import planning_input_from_case
 from app.scenarios.scenario1 import CASES_BY_ID
 from app.shared.enums import ConstraintCode, FlagCode, FlagSeverity, Outcome, Verdict
@@ -111,3 +107,17 @@ def test_escalate_flag_forces_escalation() -> None:
     flag = Flag(code=FlagCode.SUPPLIER_INACTIVE, severity=FlagSeverity.ESCALATE, message="x")
     r = _run("C10", _modify(210), (flag,))
     assert (r.verdict, r.qty, r.outcome) == (None, None, Outcome.ESCALATE)
+
+
+def test_overriding_a_hard_constraint_or_unknown_policy_is_reported() -> None:
+    d = _modify(
+        210,
+        overrides=(
+            SoftOverride(policy="budget", reason="urgent"),
+            SoftOverride(policy="no_such_policy", reason="x"),
+        ),
+    )
+    r = _run("C10", d)
+    assert not r.valid
+    assert any("budget" in i for i in r.issues)
+    assert any("no_such_policy" in i for i in r.issues)

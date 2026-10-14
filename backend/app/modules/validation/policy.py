@@ -1,6 +1,6 @@
 """Policy registries (KB D18).
 
-HARD constraints are checked by planning.constraints.check_hard and can never be overridden.
+HARD constraints are checked by planning.service.check_hard and can never be overridden.
 SOFT policies are checks a decision may break only with an explicit, recorded override reason.
 Each soft check returns a message when breached, else None (dict dispatch by policy name).
 """

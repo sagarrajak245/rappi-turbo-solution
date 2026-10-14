@@ -6,8 +6,7 @@ import pytest
 
 from app.core.config import DataQualitySettings, PlanningSettings
 from app.modules.planning.calculator import calculate
-from app.modules.validation.data_quality import check_data_quality
-from app.modules.validation.validator import baseline_decision, validate
+from app.modules.validation.service import baseline_decision, check_data_quality, validate
 from app.scenarios.inputs import planning_input_from_case
 from app.scenarios.scenario1 import CASES
 from app.scenarios.types import CaseSpec
