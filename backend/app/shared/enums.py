@@ -68,6 +68,11 @@ class ErpPoStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class UserRole(StrEnum):
+    BUYER = "buyer"
+    ADMIN = "admin"
+
+
 class RunStatus(StrEnum):
     """Lifecycle of one agent run (KB §3.2): decide, wait for the buyer, execute in the ERP."""
 

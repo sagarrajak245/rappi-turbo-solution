@@ -117,6 +117,20 @@ class LlmSettings(BaseModel):
     fault_injection: str = ""  # "primary_down" -> the primary provider always fails (R5 demo)
 
 
+class AuthSettings(BaseModel):
+    """Session cookie + seed credentials. Real values come from env (AUTH__JWT_SECRET, ...).
+
+    The defaults are for local development and tests only; set real ones anywhere else.
+    """
+
+    jwt_secret: str = "dev-only-jwt-secret-change-me-0123456789"
+    token_ttl_minutes: int = 480
+    cookie_name: str = "rappi_session"
+    cookie_secure: bool = False  # set true behind HTTPS
+    seed_buyer_password: str = "dev-buyer-password"
+    seed_admin_password: str = "dev-admin-password"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
@@ -134,6 +148,7 @@ class Settings(BaseSettings):
     data_quality: DataQualitySettings = DataQualitySettings()
     erp: ErpSettings = ErpSettings()
     llm: LlmSettings = LlmSettings()
+    auth: AuthSettings = AuthSettings()
 
     @classmethod
     def settings_customise_sources(

@@ -32,6 +32,8 @@ PURCHASING_TABLES = {
     "agent_runs",
     "lessons",
     "llm_calls",
+    "users",
+    "notifications",
 }
 
 

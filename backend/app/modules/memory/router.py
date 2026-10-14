@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.modules.auth.deps import current_user
 from app.modules.memory import service
 from app.modules.memory.schemas import LessonOut
 from app.shared.enums import LessonStatus
 
-router = APIRouter(prefix="/memory", tags=["memory"])
+router = APIRouter(prefix="/memory", tags=["memory"], dependencies=[Depends(current_user)])
 
 Session = Annotated[AsyncSession, Depends(get_session)]
 

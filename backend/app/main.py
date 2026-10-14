@@ -16,9 +16,13 @@ from app.core.logging import configure_logging
 from app.modules.agent.llm.factory import build_llm
 from app.modules.agent.router import router as agent_router
 from app.modules.agent.service import AgentService
+from app.modules.auth.router import router as auth_router
 from app.modules.erp_mock.router import router as erp_router
 from app.modules.execution.router import router as execution_router
 from app.modules.memory.router import router as memory_router
+from app.modules.notifications.broadcaster import InMemoryBroadcaster
+from app.modules.notifications.router import router as notifications_router
+from app.modules.notifications.service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +31,15 @@ logger = logging.getLogger(__name__)
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # One shared HTTP client for every LLM call; the service owns the background run tasks.
     settings = get_settings()
+    notifications = NotificationService(get_sessionmaker(), InMemoryBroadcaster())
+    app.state.notifications = notifications
     async with httpx.AsyncClient() as http:
         svc = AgentService(
             get_sessionmaker(),
             build_llm("decision", settings, http),
             build_llm("reviewer", settings, http),
             settings,
+            notify=notifications.notify,
         )
         try:
             await svc.recover()  # runs a restart interrupted before they reached the buyer
@@ -56,4 +63,6 @@ def create_app() -> FastAPI:
     app.include_router(execution_router)
     app.include_router(agent_router)
     app.include_router(memory_router)
+    app.include_router(auth_router)
+    app.include_router(notifications_router)
     return app
