@@ -93,3 +93,32 @@ def test_c9_escalates_with_options() -> None:
     assert (r.qty, r.verdict, r.outcome) == (None, None, Outcome.ESCALATE)
     assert r.options
     assert all(o.requires for o in r.options)
+
+
+def test_partial_cover_equal_to_rec_is_accept() -> None:
+    # Review F1: the cap allows exactly rec -> ACCEPT rec (still partial), never "MODIFY to rec".
+    inp = _input("C7").model_copy(update={"rec_qty": 500})
+    r = calculate(inp, SETTINGS)
+    assert (r.verdict, r.qty) == (Verdict.ACCEPT, 500)
+    assert FlagCode.PARTIAL_COVERAGE in {f.code for f in r.flags}
+
+
+def test_options_never_ask_for_negative_budget_or_break_other_caps() -> None:
+    # Review F2/F3: C8 (storage binds) with the budget also tight.
+    inp = _input("C8").model_copy(update={"budget_remaining_inr": 120 * 420})  # cap 420
+    r = calculate(inp, SETTINGS)
+    for o in r.options:
+        assert "-" not in o.requires
+        others = [
+            v
+            for k, v in r.caps.items()
+            if o.kind != "split_delivery" or k != ConstraintCode.STORAGE
+        ]
+        assert o.kind == "split_delivery" or o.qty <= min(others)
+        assert o.qty % inp.case_pack == 0 and o.qty >= inp.moq
+
+
+def test_zero_unit_cost_does_not_crash() -> None:
+    # Review F4: a free item uses no budget.
+    r = calculate(_input("C1").model_copy(update={"unit_cost_inr": 0}), SETTINGS)
+    assert ConstraintCode.BUDGET not in r.caps

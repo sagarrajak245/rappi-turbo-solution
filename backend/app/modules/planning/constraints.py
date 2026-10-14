@@ -19,7 +19,9 @@ def compute_caps(
     sellable_after_arrival: float | None,
     stock_at_arrival: float,
 ) -> dict[ConstraintCode, int]:
-    caps = {ConstraintCode.BUDGET: _budget_cap(inp)}
+    caps: dict[ConstraintCode, int] = {}
+    if inp.unit_cost_inr > 0:  # a free item uses no budget
+        caps[ConstraintCode.BUDGET] = _budget_cap(inp)
     if inp.zone_capacity is not None:
         free = (
             inp.zone_capacity - inp.zone_other_load - Decimal(physical_at_arrival) * inp.unit_volume
@@ -33,8 +35,6 @@ def compute_caps(
 
 
 def _budget_cap(inp: PlanningInput) -> int:
-    if inp.unit_cost_inr <= 0:
-        raise ValueError(f"unit cost must be positive for {inp.sku}")
     return floor_to_case(math.floor(inp.budget_remaining_inr / inp.unit_cost_inr), inp.case_pack)
 
 

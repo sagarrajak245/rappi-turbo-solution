@@ -79,7 +79,7 @@ def calculate(inp: PlanningInput, settings: PlanningSettings) -> CalcResult:
         sellable_after_arrival=sellable,
         stock_at_arrival=stock_at_arrival,
     )
-    max_qty = min(caps.values())
+    max_qty = min(caps.values(), default=need_qty)
 
     flags: list[Flag] = []
     if stock_at_arrival < 0:
@@ -106,7 +106,8 @@ def calculate(inp: PlanningInput, settings: PlanningSettings) -> CalcResult:
         ):
             qty, verdict = rec, Verdict.ACCEPT
     elif max_qty >= inp.moq and max_qty > 0:
-        qty, verdict = max_qty, Verdict.MODIFY
+        qty = max_qty
+        verdict = Verdict.ACCEPT if max_qty == inp.rec_qty else Verdict.MODIFY
         flags.append(
             Flag(
                 code=FlagCode.PARTIAL_COVERAGE,
