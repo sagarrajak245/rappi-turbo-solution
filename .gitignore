@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 KNOWLEDGE_BASE.md
+.claude
+
 
 # Python
 __pycache__/
