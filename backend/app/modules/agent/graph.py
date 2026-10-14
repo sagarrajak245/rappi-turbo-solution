@@ -79,6 +79,16 @@ def facts(inp: PlanningInput, calc: CalcResult, flags: tuple[Flag, ...]) -> dict
     }
 
 
+def review_facts(inp: PlanningInput, calc: CalcResult, flags: tuple[Flag, ...]) -> dict[str, Any]:
+    """The LLM's facts plus the stock breakdown, kept on the proposal for the review page."""
+    return {
+        **facts(inp, calc, flags),
+        "on_hand": inp.on_hand,
+        "reserved": inp.reserved,
+        "inbound": [po.model_dump() for po in inp.inbound],
+    }
+
+
 def validation_feedback(v: ValidationResult) -> list[str]:
     out = list(v.issues)
     out += [f"{x.code.value}: {x.message}" for x in v.violations]
@@ -204,7 +214,7 @@ def build_graph(
         return {"decision": decision, "validation": v, "escalate_reason": reason}
 
     async def propose(state: AgentState) -> AgentState:
-        d, v, calc = state["decision"], state["validation"], state["calc"]
+        d, v, calc, inp = state["decision"], state["validation"], state["calc"], state["inp"]
         issues = list(v.issues) + [x.message for x in v.violations]
         if state.get("escalate_reason"):
             issues.append(state["escalate_reason"])
@@ -212,7 +222,7 @@ def build_graph(
             thread_id=state["thread_id"],
             sku=state["sku"],
             node=state["node"],
-            rec_qty=state["inp"].rec_qty,
+            rec_qty=inp.rec_qty,
             baseline_qty=calc.qty,
             verdict=v.verdict,
             qty=v.qty,
@@ -227,6 +237,8 @@ def build_graph(
             attempts=state.get("attempts", 0),
             llm_calls=len(state.get("llm_records", [])),
             lessons_applied=state.get("lesson_ids", []) if not state.get("skip_llm") else [],
+            facts=review_facts(inp, calc, state["flags"]),
+            projection=planning.project_stock(inp, calc, v.qty or 0),
         )
         return {"proposal": proposal}
 

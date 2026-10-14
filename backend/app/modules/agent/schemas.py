@@ -1,11 +1,12 @@
 """Structured LLM outputs (KB §3.2 nodes 5 and 7) and the agent API DTOs."""
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.execution.schemas import ExecutionResult
-from app.modules.planning.schemas import Flag, ResolutionOption
+from app.modules.planning.schemas import Flag, ResolutionOption, StockProjection
 from app.modules.validation.schemas import ProposedDecision, SoftOverride
 from app.shared.enums import Outcome, RunStatus, Verdict
 
@@ -74,6 +75,8 @@ class ProposalOut(_Frozen):
     attempts: int = 0
     llm_calls: int = 0
     lessons_applied: list[int] = []  # lesson ids that reached the decide prompt
+    facts: dict[str, Any] = {}  # the numbers behind the decision, for the review page
+    projection: StockProjection | None = None  # 14-day stock: no order / system / agent qty
 
 
 class HumanAction(StrEnum):
