@@ -1,10 +1,13 @@
-"""Cross-module reads for the buyer's screens. No business rules here."""
+"""Read-model for the buyer's screens: read-only queries across modules. No business rules here.
+
+Aggregation and "latest per key" selection happen in SQL so the cost stays bounded as history grows.
+"""
 
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Row, func, select
+from sqlalchemy import Row, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -34,25 +37,42 @@ async def list_recommendations(
     return (await session.execute(stmt)).all()
 
 
-async def list_runs_newest_first(session: AsyncSession) -> Sequence[AgentRun]:
-    stmt = select(AgentRun).order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+async def list_latest_runs(session: AsyncSession) -> Sequence[AgentRun]:
+    """The newest run per (sku, node)."""
+    rank = (
+        func.row_number()
+        .over(
+            partition_by=(AgentRun.sku, AgentRun.node_code),
+            order_by=(AgentRun.created_at.desc(), AgentRun.id.desc()),
+        )
+        .label("rank")
+    )
+    ranked = select(AgentRun.id, rank).subquery()
+    stmt = select(AgentRun).join(ranked, AgentRun.id == ranked.c.id).where(ranked.c.rank == 1)
     return (await session.execute(stmt)).scalars().all()
 
 
+async def count_runs(session: AsyncSession, statuses: Sequence[RunStatus]) -> int:
+    stmt = select(func.count()).select_from(AgentRun).where(AgentRun.status.in_(statuses))
+    return int((await session.execute(stmt)).scalar_one())
+
+
 async def list_runs_by_status(
-    session: AsyncSession, statuses: Sequence[RunStatus]
+    session: AsyncSession, statuses: Sequence[RunStatus], limit: int
 ) -> Sequence[AgentRun]:
     stmt = (
         select(AgentRun)
         .where(AgentRun.status.in_(statuses))
         .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(limit)
     )
     return (await session.execute(stmt)).scalars().all()
 
 
-async def list_decisions(session: AsyncSession) -> Sequence[dict[str, object]]:
-    stmt = select(AgentRun.decision).where(AgentRun.decision.is_not(None))
-    return [d for d in (await session.execute(stmt)).scalars().all() if d]
+async def decision_action_counts(session: AsyncSession) -> dict[str, int]:
+    action = AgentRun.decision["action"].as_string()
+    stmt = select(action, func.count()).where(AgentRun.decision.is_not(None)).group_by(action)
+    return {a: int(n) for a, n in (await session.execute(stmt)).all() if a is not None}
 
 
 async def list_executed_orders(
@@ -107,14 +127,25 @@ async def storage_capacity(
     return (await session.execute(stmt)).all()
 
 
-async def list_snapshots_with_volume(
-    session: AsyncSession, node_ids: Sequence[int]
-) -> Sequence[Row[InventorySnapshot, Decimal]]:
-    """(snapshot, unit_volume) oldest first, so the last one per node x product is current."""
-    stmt = (
-        select(InventorySnapshot, Product.unit_volume)
-        .join(Product, InventorySnapshot.product_id == Product.id)
-        .where(InventorySnapshot.node_id.in_(node_ids))
-        .order_by(InventorySnapshot.as_of, InventorySnapshot.id)
+async def used_volume(session: AsyncSession, node_ids: Sequence[int]) -> dict[int, Decimal]:
+    """(node_id, volume) of current stock: latest snapshot per node x product, negatives as 0."""
+    rank = (
+        func.row_number()
+        .over(
+            partition_by=(InventorySnapshot.node_id, InventorySnapshot.product_id),
+            order_by=(InventorySnapshot.as_of.desc(), InventorySnapshot.id.desc()),
+        )
+        .label("rank")
     )
-    return (await session.execute(stmt)).all()
+    ranked = (
+        select(InventorySnapshot.id, rank).where(InventorySnapshot.node_id.in_(node_ids)).subquery()
+    )
+    stock = case((InventorySnapshot.on_hand > 0, InventorySnapshot.on_hand), else_=0)
+    stmt = (
+        select(InventorySnapshot.node_id, func.sum(stock * Product.unit_volume))
+        .join(ranked, InventorySnapshot.id == ranked.c.id)
+        .join(Product, InventorySnapshot.product_id == Product.id)
+        .where(ranked.c.rank == 1)
+        .group_by(InventorySnapshot.node_id)
+    )
+    return {node_id: Decimal(str(vol)) for node_id, vol in (await session.execute(stmt)).all()}

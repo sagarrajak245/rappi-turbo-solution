@@ -1,6 +1,5 @@
 """The buyer's screens: inbox, purchase orders and the home dashboard. Read only."""
 
-from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
@@ -29,7 +28,7 @@ async def inbox(
     session: AsyncSession, node: str | None, status: RunStatus | None
 ) -> list[InboxRow]:
     latest: dict[tuple[str, str], RunSummary] = {}
-    for row in await repo.list_runs_newest_first(session):
+    for row in await repo.list_latest_runs(session):
         latest.setdefault((row.sku, row.node_code), agent.summarize(row))
     rows = []
     for rec, product, n in await repo.list_recommendations(session, node):
@@ -73,11 +72,11 @@ async def purchase_orders(session: AsyncSession) -> list[PurchaseOrderRow]:
     ]
 
 
-def _agreement_pct(decisions: Sequence[dict[str, object]]) -> float | None:
-    judged = [d["action"] for d in decisions if d.get("action") in _JUDGED]
+def _agreement_pct(actions: dict[str, int]) -> float | None:
+    judged = sum(n for a, n in actions.items() if a in _JUDGED)
     if not judged:
         return None
-    return round(100 * judged.count(HumanAction.APPROVE) / len(judged), 1)
+    return round(100 * actions.get(HumanAction.APPROVE, 0) / judged, 1)
 
 
 async def dashboard(session: AsyncSession, user: UserOut, now: datetime) -> DashboardSummary:
@@ -90,21 +89,14 @@ async def dashboard(session: AsyncSession, user: UserOut, now: datetime) -> Dash
         for node_id, used, limit in await repo.budget_totals(session, ids, now.strftime("%Y-%m"))
     }
     capacity = dict(await repo.storage_capacity(session, ids))
-    on_hand: dict[tuple[int, int], Decimal] = {}
-    for snap, volume in await repo.list_snapshots_with_volume(session, ids):
-        on_hand[(snap.node_id, snap.product_id)] = max(0, snap.on_hand) * volume
-    used: dict[int, Decimal] = {}
-    for (node_id, _), vol in on_hand.items():
-        used[node_id] = used.get(node_id, Decimal(0)) + vol
-
-    waiting = await repo.list_runs_by_status(session, (RunStatus.AWAITING_APPROVAL,))
-    attention = await repo.list_runs_by_status(session, NEEDS_ATTENTION)
+    used = await repo.used_volume(session, ids)
+    waiting = (RunStatus.AWAITING_APPROVAL,)
     start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return DashboardSummary(
-        pending_approvals=len(waiting),
-        needs_attention=len(attention),
+        pending_approvals=await repo.count_runs(session, waiting),
+        needs_attention=await repo.count_runs(session, NEEDS_ATTENTION),
         committed_today_inr=await repo.committed_since(session, list(code.values()), start_of_day),
-        agreement_pct=_agreement_pct(await repo.list_decisions(session)),
+        agreement_pct=_agreement_pct(await repo.decision_action_counts(session)),
         budgets=[
             BudgetBar(node=code[i], used_inr=budgets[i][0], limit_inr=budgets[i][1])
             for i in ids
@@ -115,5 +107,7 @@ async def dashboard(session: AsyncSession, user: UserOut, now: datetime) -> Dash
             for i in ids
             if i in capacity
         ],
-        needs_decision=[agent.summarize(r) for r in waiting[:5]],
+        needs_decision=[
+            agent.summarize(r) for r in await repo.list_runs_by_status(session, waiting, limit=5)
+        ],
     )
