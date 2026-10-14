@@ -8,9 +8,12 @@ describe("verdictStyle", () => {
     expect(verdictStyle("REJECT").tone).toBe("coral");
     expect(verdictStyle("INVESTIGATE").tone).toBe("slate");
   });
-  it("outcome ESCALATED overrides the verdict with a red outline", () => {
-    const s = verdictStyle("ACCEPT", "ESCALATED");
+  it("the backend's ESCALATE outcome overrides the verdict with a red outline", () => {
+    const s = verdictStyle(null, "ESCALATE");
     expect(s.tone).toBe("red-outline");
     expect(s.label).toBe("Escalated");
+  });
+  it("a run with no verdict yet is neutral", () => {
+    expect(verdictStyle(null)).toEqual({ label: "Pending", tone: "slate" });
   });
 });
