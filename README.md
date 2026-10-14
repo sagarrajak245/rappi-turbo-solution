@@ -375,6 +375,23 @@ The brief lists optional buyer problems. These are handled inside the Scenario 1
 
 No Docker, Postgres or Redis is required: the backend uses a SQLite file by default.
 
+**Don't have uv or pnpm?** Install them once:
+
+```bash
+# uv (Python package manager), pick one
+pip install uv                                                     # any OS with Python 3.12
+curl -LsSf https://astral.sh/uv/install.sh | sh                    # macOS / Linux
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # Windows
+
+# pnpm (comes with Node 22 through corepack)
+corepack enable            # or: npm install -g pnpm@10
+```
+
+Open a new terminal afterwards and check with `uv --version` and `pnpm --version`. If `uv` is
+still "command not found" after `pip install uv`, the pip scripts folder is not on your PATH:
+prefix every command with `python -m`, for example `python -m uv sync` and
+`python -m uv run pytest -q`.
+
 ### 1. Configure
 
 ```bash
@@ -451,6 +468,62 @@ Set `TEST_DATABASE_URL` to a Postgres URL to run the backend suite against Postg
 8. Try a blocked case: C9 escalates with options, and Q1 asks you to investigate.
 9. Sign in as the admin to see runs by status, LLM calls, tokens, cost and fallback rate on
    **Admin**, and the case × check matrix on **Evaluation**.
+
+### Testing each case in the UI
+
+Every evaluation case is one row in the **Inbox** (product × store). Find the row, click **Run
+agent**, then **Review**. The live agent needs `GROQ_API_KEY` or `GEMINI_API_KEY` in `.env`.
+
+> Seed on the day you test (`uv run python -m app.seed scenario1`). Stock snapshots older than
+> 24 hours are flagged stale, and every case then answers INVESTIGATE. Re-seeding also resets
+> earlier runs, so it is the way to start over.
+
+**Decisions:** check the verdict and the quantity.
+
+| Case | Inbox row (product @ store) | Expect |
+|---|---|---|
+| C1 | COKE-750 @ BANDRA | ACCEPT 800. Approve it: the result goes draft → submitted → verified with an ERP number |
+| C2 | PARLEG-800 @ POWAI | REJECT 0: open POs already cover the need |
+| C3 | TATATEA-250 @ THANE | MODIFY 300: the recommendation ignored an open PO |
+| C4 | MAGGI-70 @ THANE | MODIFY 1128: the recommendation is too low |
+| C5 | TATASALT-1KG @ LOWER-PAREL | MODIFY 150: raised to the supplier's minimum order |
+| C6 | REDBULL-250 @ BANDRA | MODIFY 816: case pack of 48. Try **Change qty** to 805: refused, with 768 / 816 suggested |
+| C7 | FORTUNE-OIL-1L @ ANDHERI-W | MODIFY 500, partial coverage: the budget allows only 500 |
+| C8 | SURF-1KG @ BANDRA | MODIFY 400, partial coverage: storage space allows only 400 |
+| C9 | HALDIRAM-BHUJIA-200 @ POWAI | ESCALATE: the minimum order costs more than the budget; options shown |
+| C10 | AASHIRVAAD-ATTA-5KG @ ANDHERI-W | MODIFY 210: several limits at once, overdue PO flagged |
+| C11 | AMUL-TAAZA-500 @ POWAI | MODIFY 204: shelf life limits a perishable |
+
+**Data quality:** check that the agent refuses to guess.
+
+| Case | Inbox row | Expect |
+|---|---|---|
+| Q1 | BRITANNIA-BREAD-400 @ POWAI | INVESTIGATE: stock count older than 24 hours |
+| Q2 | KURKURE-90 @ THANE | INVESTIGATE: negative stock |
+| Q3a | DAIRYMILK-50 @ BANDRA | MODIFY 216: no forecast, sales average used (warning) |
+| Q3b | DAIRYMILK-50 @ LOWER-PAREL | INVESTIGATE: no forecast and no sales |
+| Q4 | LAYS-52 @ ANDHERI-W | MODIFY 400: overdue PO left out of stock and flagged |
+| Q5 | BISLERI-1L @ LOWER-PAREL | ESCALATE: supplier inactive |
+| Q6 | AMUL-BUTTER-100 @ THANE | INVESTIGATE: forecast is twice the real sales |
+| Q7 | DETTOL-SOAP-75 @ BANDRA | MODIFY 180: an instruction hidden in the product notes is flagged and never sent to the LLM |
+
+**Feedback loop:** approve the proposal, then watch the **Result** panel.
+
+| Case | Inbox row | ERP surprise | Expect |
+|---|---|---|---|
+| F1 | NESCAFE-50 @ ANDHERI-W | Price +8 % breaks the budget | Draft cancelled, re-planned to 210, back to you for review |
+| F2 | KISSAN-KETCHUP-500 @ BANDRA | Case pack becomes 12 | Re-planned to 144, back to you for review |
+| F3 | COLGATE-100 @ POWAI | Timeout after the order is created | Retried with the same key: one order, no duplicate |
+| F4 | HS-SHAMPOO-180 @ LOWER-PAREL | ERP rejects the submit | Escalated with the ERP's reason |
+| F5 | PEPSI-750 @ THANE | Delivery 3 days late | Verified with a stock-out-before-arrival warning |
+| F6 | GOODDAY-200 @ BANDRA | ERP confirms another quantity | Not fixed silently: the run waits for a human |
+
+**Learning:** on C1, choose **Change qty** → 700 with a reason. Open **Memory**, confirm the
+lesson, run C1 again: the proposal lists the lesson it used.
+
+**Roles:** as the buyer, **Admin** shows "your role cannot do this". As `admin@rappi.test`,
+**Admin** shows metrics and **Evaluation** shows the case × check matrix. To fill the matrix, run
+`uv run python -m app.evaluation run --scenario 1` first.
 
 ## Repository layout
 
