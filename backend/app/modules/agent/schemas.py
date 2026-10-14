@@ -1,7 +1,10 @@
 """Structured LLM outputs (KB §3.2 nodes 5 and 7) and the agent API DTOs."""
 
+from enum import StrEnum
+
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.planning.schemas import Flag, ResolutionOption
 from app.modules.validation.schemas import ProposedDecision, SoftOverride
 from app.shared.enums import Outcome, Verdict
 
@@ -37,4 +40,58 @@ class ReviewOut(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     ok: bool
+    issues: list[str] = []
+
+
+class _Frozen(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class RunRequest(_Frozen):
+    sku: str = Field(min_length=1)
+    node: str = Field(min_length=1)
+
+
+class ProposalOut(_Frozen):
+    """What the buyer sees at the human gate (KB §3.2 node 9)."""
+
+    thread_id: str
+    sku: str
+    node: str
+    rec_qty: int
+    baseline_qty: int | None
+    verdict: Verdict | None
+    qty: int | None
+    outcome: Outcome
+    valid: bool
+    reasons: list[str] = []
+    deviation_reason: str | None = None
+    flags: list[Flag] = []
+    options: list[ResolutionOption] = []
+    issues: list[str] = []  # validator issues, or why the run escalated
+    suggestions: list[int] = []  # nearest valid quantities when the case pack is off
+    attempts: int = 0
+    llm_calls: int = 0
+
+
+class HumanAction(StrEnum):
+    APPROVE = "approve"
+    MODIFY = "modify"
+    REJECT = "reject"
+    ACKNOWLEDGE = "acknowledge"
+
+
+class HumanDecision(_Frozen):
+    """Resume value of the human gate. A modified qty is re-validated before it counts."""
+
+    action: HumanAction
+    qty: int | None = Field(default=None, ge=0)
+    reason: str | None = None
+
+
+class RunOut(_Frozen):
+    thread_id: str
+    status: str  # approved | modified | rejected | acknowledged | invalid_modification
+    verdict: Verdict | None
+    qty: int | None
     issues: list[str] = []
