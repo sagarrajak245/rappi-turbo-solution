@@ -31,6 +31,8 @@ PURCHASING_TABLES = {
     "erp_behaviours",
     "agent_runs",
     "llm_calls",
+    "users",
+    "notifications",
 }
 
 
