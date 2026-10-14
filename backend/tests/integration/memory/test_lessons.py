@@ -67,8 +67,9 @@ async def test_l1_feedback_becomes_a_lesson_applied_and_cited_next_run(
 
     async with sessionmaker() as s:
         pending = await memory.list_lessons(s, LessonStatus.PENDING)
+    # the lesson keeps what the buyer did, not only why, so the next prompt has the context
     assert [(x.text, x.sku, x.node, x.source_run_id) for x in pending] == [
-        (TEXT, "COKE-750", "BANDRA", first.id)
+        (f"Buyer rejected the proposed 800. Reason: {TEXT}", "COKE-750", "BANDRA", first.id)
     ]
     async with sessionmaker() as s:
         await memory.confirm(s, pending[0].id, NOW)

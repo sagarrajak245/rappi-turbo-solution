@@ -122,5 +122,6 @@ class RunOut(_Frozen):
     status: RunStatus
     proposal: ProposalOut | None = None
     execution: ExecutionResult | None = None
+    decision: HumanDecision | None = None  # what the buyer chose, once they chose
     replans_done: int = 0
     error: str | None = None  # why it failed, or why the last decision was not accepted
