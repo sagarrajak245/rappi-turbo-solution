@@ -9,7 +9,7 @@ Nothing before the gate has side effects, so recover() simply re-runs rows left 
 import asyncio
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -27,6 +27,7 @@ from app.modules.agent.state import AgentState
 from app.modules.erp_mock import service as erp
 from app.modules.execution import service as execution
 from app.modules.execution.schemas import ApprovedOrder, ExecutionResult, ExecutionStatus
+from app.modules.memory import service as memory
 from app.modules.planning import service as planning
 from app.modules.planning.schemas import PlanningInput
 from app.modules.validation import service as validation
@@ -40,6 +41,9 @@ _EXECUTION_TO_RUN = {
     ExecutionStatus.ESCALATED: RunStatus.ESCALATED,
     ExecutionStatus.NEEDS_HUMAN: RunStatus.NEEDS_HUMAN,
 }
+
+
+_NOTIFY_AFTER_DECISION = frozenset(_EXECUTION_TO_RUN.values())
 
 
 @dataclass
@@ -82,7 +86,9 @@ class AgentService:
         review_llm: LlmClient,
         settings: Settings,
         clock: Callable[[], datetime] = _utcnow,
+        notify: Callable[[str, str, str], Awaitable[None]] | None = None,
     ) -> None:
+        self._notify = notify  # (run_id, kind, message); injected so the agent stays decoupled
         self._sm = sessionmaker
         self._graph = build_graph(GraphDeps(sessionmaker, decide_llm, review_llm, settings))
         self._s = settings
@@ -154,11 +160,16 @@ class AgentService:
             )
             if written:
                 repo.add_llm_calls(session, run_id, state.get("llm_records", []), now)
+                await memory.mark_applied(session, proposal.lessons_applied, now)
             await session.commit()
+        if written:
+            await self._tell(
+                run_id, RunStatus.AWAITING_APPROVAL, f"{sku} at {node}: proposal ready for review"
+            )
 
     async def _fail(self, run_id: str, reason: str) -> None:
         async with self._sm() as session:
-            await repo.update_run(
+            written = await repo.update_run(
                 session,
                 run_id,
                 self._clock(),
@@ -167,6 +178,17 @@ class AgentService:
                 error=reason,
             )
             await session.commit()
+        if written:
+            await self._tell(run_id, RunStatus.FAILED, f"Run failed: {reason}")
+
+    async def _tell(self, run_id: str, status: RunStatus, message: str) -> None:
+        """Best effort: a broken notifier never changes the run's outcome."""
+        if self._notify is None:
+            return
+        try:
+            await self._notify(run_id, status.value, message)
+        except Exception:
+            logger.exception("could not send notification", extra={"run_id": run_id})
 
     async def drain(self) -> None:
         """Wait for every background run (tests, graceful shutdown)."""
@@ -211,7 +233,7 @@ class AgentService:
                 raise NotFound(f"Run {run_id} not found", {"run_id": run_id})
             return _out(row)
 
-    async def decide(self, run_id: str, human: HumanDecision) -> RunOut:
+    async def decide(self, run_id: str, human: HumanDecision, user_id: str | None = None) -> RunOut:
         """Apply the buyer's decision. Only a run awaiting approval accepts one (else 409)."""
         await self.get_run(run_id)  # 404 before 409
         async with self._sm() as session:
@@ -223,11 +245,14 @@ class AgentService:
             raise Conflict(f"Run {run_id} is not waiting for a decision", {"run_id": run_id})
         progress = _Progress()
         try:
-            await self._apply(run_id, human, progress)
+            await self._apply(run_id, human, progress, user_id)
         except BaseException as exc:  # cancellation too: never leave the run `executing`
             await asyncio.shield(self._release(run_id, progress, f"{type(exc).__name__}: {exc}"))
             raise
-        return await self.get_run(run_id)
+        out = await self.get_run(run_id)
+        if out.status in _NOTIFY_AFTER_DECISION:
+            await self._tell(run_id, out.status, f"{out.sku} at {out.node}: {out.status.value}")
+        return out
 
     async def _release(self, run_id: str, progress: "_Progress", error: str) -> None:
         """Before the ERP was touched the buyer may simply retry; after, a human must check it."""
@@ -243,17 +268,27 @@ class AgentService:
             )
             await session.commit()
 
-    async def _apply(self, run_id: str, human: HumanDecision, progress: "_Progress") -> None:
+    async def _apply(
+        self, run_id: str, human: HumanDecision, progress: "_Progress", user_id: str | None
+    ) -> None:
         now = self._clock()
         decision = human.model_dump(mode="json")
+        by: dict[str, Any] = {"decided_by": user_id}
         async with self._sm() as session:
             row = await repo.get_run(session, run_id)
             assert row is not None  # claimed above
             p = ProposalOut.model_validate(row.proposal)
 
             if human.action is HumanAction.REJECT:
+                self._learn(session, row, human, now)
                 await repo.update_run(
-                    session, run_id, now, status=RunStatus.REJECTED, decision=decision, error=None
+                    session,
+                    run_id,
+                    now,
+                    status=RunStatus.REJECTED,
+                    decision=decision,
+                    error=None,
+                    **by,
                 )
                 await session.commit()
                 return
@@ -265,6 +300,7 @@ class AgentService:
                     status=RunStatus.ACKNOWLEDGED,
                     decision=decision,
                     error=None,
+                    **by,
                 )
                 await session.commit()
                 return
@@ -285,6 +321,7 @@ class AgentService:
                     await session.commit()
                     return
                 qty = human.qty
+                self._learn(session, row, human, now)
             elif not (p.valid and p.outcome is Outcome.PROPOSE and p.qty):
                 # Nothing orderable was proposed (escalation, no-buy): approving acknowledges it.
                 await repo.update_run(
@@ -294,12 +331,19 @@ class AgentService:
                     status=RunStatus.ACKNOWLEDGED,
                     decision=decision,
                     error=None,
+                    **by,
                 )
                 await session.commit()
                 return
             if not qty:  # a MODIFY to 0 is a valid no-buy
                 await repo.update_run(
-                    session, run_id, now, status=RunStatus.REJECTED, decision=decision, error=None
+                    session,
+                    run_id,
+                    now,
+                    status=RunStatus.REJECTED,
+                    decision=decision,
+                    error=None,
+                    **by,
                 )
                 await session.commit()
                 return
@@ -321,6 +365,7 @@ class AgentService:
                 "decision": decision,
                 "execution": result.model_dump(mode="json"),
                 "error": None,
+                **by,
             }
             if result.status is ExecutionStatus.REPLAN_REQUIRED:
                 values |= await self._replanned(session, row, p, inp, result, now)
@@ -328,6 +373,12 @@ class AgentService:
                 values["status"] = _EXECUTION_TO_RUN[result.status]
             await repo.update_run(session, run_id, now, **values)
             await session.commit()
+
+    @staticmethod
+    def _learn(session: AsyncSession, row: AgentRun, human: HumanDecision, now: datetime) -> None:
+        """A reasoned REJECT or MODIFY becomes a pending lesson for the buyer to confirm (D25)."""
+        if human.reason and human.reason.strip():
+            memory.record_feedback(session, row.id, row.sku, row.node_code, human.reason, now)
 
     def _check_modify(self, human: HumanDecision, inp: PlanningInput, now: datetime) -> str | None:
         if human.qty is None:

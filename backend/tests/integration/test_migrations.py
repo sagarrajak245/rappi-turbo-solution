@@ -30,7 +30,13 @@ PURCHASING_TABLES = {
     "erp_requests",
     "erp_behaviours",
     "agent_runs",
+    "lessons",
     "llm_calls",
+    "users",
+    "notifications",
+    "notification_reads",
+    "eval_runs",
+    "eval_results",
 }
 
 
