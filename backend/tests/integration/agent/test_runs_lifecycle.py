@@ -176,3 +176,79 @@ async def test_recover_reruns_runs_interrupted_by_a_restart(
 
     run = await svc.get_run("interrupted")
     assert run.status is RunStatus.AWAITING_APPROVAL
+
+
+@pytest.mark.usefixtures("seeded")
+async def test_failure_after_the_erp_was_touched_needs_a_human(
+    sessionmaker: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = make(sessionmaker, [accept(230)])
+    run = await svc.start_run("NESCAFE-50", "ANDHERI-W")
+    await svc.drain()
+
+    async def boom(*_: Any) -> None:
+        raise RuntimeError("erp read failed")
+
+    monkeypatch.setattr("app.modules.agent.service.erp.get", boom)
+    with pytest.raises(RuntimeError):
+        await svc.decide(run.id, APPROVE)  # the draft is already cancelled for re-plan
+
+    stuck = await svc.get_run(run.id)
+    assert stuck.status is RunStatus.NEEDS_HUMAN  # never back to the gate: the ERP has a PO
+    assert stuck.error
+    with pytest.raises(Conflict):
+        await svc.decide(run.id, HumanDecision(action=HumanAction.REJECT, reason="no"))
+
+
+@pytest.mark.usefixtures("seeded")
+async def test_recover_hands_runs_interrupted_mid_execution_to_a_human(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessionmaker() as s:
+        s.add(
+            AgentRun(
+                id="mid-erp",
+                sku="COKE-750",
+                node_code="BANDRA",
+                status=RunStatus.EXECUTING,
+                replans_done=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        await s.commit()
+    svc = make(sessionmaker, [])
+    assert await svc.recover() == 0
+    run = await svc.get_run("mid-erp")
+    assert run.status is RunStatus.NEEDS_HUMAN and run.error
+
+
+class _GatedLlm(ScriptedLlm):
+    def __init__(self, script: list[dict[str, Any] | Exception], gate: asyncio.Event) -> None:
+        super().__init__(script)
+        self.gate = gate
+
+    async def complete_json(
+        self, system: str, user: str, schema: type[T]
+    ) -> tuple[T, LlmCallRecord]:
+        await self.gate.wait()
+        return await super().complete_json(system, user, schema)
+
+
+@pytest.mark.usefixtures("seeded")
+async def test_a_stale_background_run_never_reopens_a_decided_run(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    gate = asyncio.Event()
+    svc = make(sessionmaker, [accept(800)], decide_llm=_GatedLlm([accept(800)], gate))
+    run = await svc.start_run("COKE-750", "BANDRA")
+    async with sessionmaker() as s:  # another process finished this run meanwhile
+        row = await s.get(AgentRun, run.id)
+        assert row is not None
+        row.status = RunStatus.COMPLETED
+        await s.commit()
+    gate.set()
+    await svc.drain()
+
+    assert (await svc.get_run(run.id)).status is RunStatus.COMPLETED
+    assert await llm_rows(sessionmaker, run.id) == 0
