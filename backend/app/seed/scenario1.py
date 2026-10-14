@@ -21,6 +21,7 @@ from app.models import (
     DemandForecast,
     ErpBehaviour,
     ErpPurchaseOrder,
+    ErpRequest,
     InventorySnapshot,
     Node,
     PoLine,
@@ -182,6 +183,9 @@ async def seed_scenario1(session: AsyncSession, *, today: date, now: datetime) -
     pairs |= {(c.node, n.sku) for c in s1.CASES for n in c.zone_neighbours}
     for node_code, sku in sorted(pairs):
         await _clear_pair(session, nodes[node_code], products[sku])
+    # The mock ERP's idempotency ledger has no SKU x node, and the seed is local-only, so clear it
+    # whole: otherwise a replayed key could return a response for an order deleted above.
+    await session.execute(delete(ErpRequest))
 
     period = today.strftime("%Y-%m")
     for node_code, sku in sorted(pairs):

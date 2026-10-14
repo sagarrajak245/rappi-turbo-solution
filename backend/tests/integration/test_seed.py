@@ -8,6 +8,7 @@ from app.models import (
     Budget,
     DemandForecast,
     ErpBehaviour,
+    ErpRequest,
     InventorySnapshot,
     Node,
     PoLine,
@@ -186,3 +187,20 @@ async def test_reseed_removes_orders_placed_since(session: AsyncSession) -> None
     assert (
         await session.execute(select(PurchaseOrder).where(PurchaseOrder.po_number == "RUN-1"))
     ).scalar_one_or_none() is None
+
+
+async def test_reseed_clears_the_erp_idempotency_ledger(session: AsyncSession) -> None:
+    """A replayed key must not return a response for an ERP order the reseed deleted."""
+    await seed_scenario1(session, today=TODAY, now=NOW)
+    session.add(
+        ErpRequest(
+            idempotency_key="run-1",
+            operation="create",
+            request_hash="h",
+            response={},
+            created_at=NOW,
+        )
+    )
+    await session.commit()
+    await seed_scenario1(session, today=TODAY, now=NOW)
+    assert (await session.execute(select(func.count()).select_from(ErpRequest))).scalar_one() == 0
