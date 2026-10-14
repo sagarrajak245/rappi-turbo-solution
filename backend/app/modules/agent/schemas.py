@@ -73,6 +73,7 @@ class ProposalOut(_Frozen):
     suggestions: list[int] = []  # nearest valid quantities when the case pack is off
     attempts: int = 0
     llm_calls: int = 0
+    lessons_applied: list[int] = []  # lesson ids that reached the decide prompt
 
 
 class HumanAction(StrEnum):

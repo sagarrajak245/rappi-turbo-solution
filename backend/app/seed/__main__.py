@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, time
 
 from app.core.config import get_settings
 from app.core.db import create_engine, create_sessionmaker, resolve_database
+from app.modules.auth.seed import seed_users
 from app.seed.guard import RemoteSeedRefused, ensure_seed_target
 from app.seed.scenario1 import seed_scenario1
 
@@ -22,7 +23,8 @@ async def _run(name: str, today: date, now: datetime, allow_remote: bool) -> dic
     engine = create_engine(cfg)
     try:
         async with create_sessionmaker(engine)() as session:
-            return await SEEDERS[name](session, today=today, now=now)
+            report = await SEEDERS[name](session, today=today, now=now)
+            return report | await seed_users(session, get_settings(), now)
     finally:
         await engine.dispose()
 

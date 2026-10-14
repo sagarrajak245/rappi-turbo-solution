@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.db import get_session
 from app.main import create_app
+from app.modules.auth.deps import current_user
+from app.modules.auth.schemas import UserOut
 from app.seed.scenario1 import seed_scenario1
+from app.shared.enums import UserRole
 
 TODAY = datetime.now(UTC).date()
 
@@ -25,6 +28,9 @@ async def client(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterato
             yield s
 
     app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[current_user] = lambda: UserOut(
+        id="a", name="n", email="e", role=UserRole.ADMIN, branch="Mumbai"
+    )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
@@ -54,3 +60,9 @@ async def test_invalid_order_uses_error_envelope(client: AsyncClient) -> None:
     res = await client.post("/execution/orders", json={**body(TODAY), "qty": 0})
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "validation_failed"
+
+
+async def test_direct_orders_need_an_admin() -> None:
+    app = create_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        assert (await c.post("/execution/orders", json={})).status_code == 401

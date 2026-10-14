@@ -117,6 +117,23 @@ class LlmSettings(BaseModel):
     fault_injection: str = ""  # "primary_down" -> the primary provider always fails (R5 demo)
 
 
+class AuthSettings(BaseModel):
+    """Session cookie + seed credentials. Real values come from env (AUTH__JWT_SECRET, ...).
+
+    The defaults are for local development and tests only; set real ones anywhere else.
+    """
+
+    jwt_secret: str = "dev-only-jwt-secret-change-me-0123456789"
+    token_ttl_minutes: int = 480
+    cookie_name: str = "rappi_session"
+    cookie_secure: bool = False  # set true behind HTTPS
+    seed_buyer_password: str = "dev-buyer-password"
+    seed_admin_password: str = "dev-admin-password"
+
+
+_DEV_ENVS = frozenset({"local", "test"})
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
@@ -134,6 +151,22 @@ class Settings(BaseSettings):
     data_quality: DataQualitySettings = DataQualitySettings()
     erp: ErpSettings = ErpSettings()
     llm: LlmSettings = LlmSettings()
+    auth: AuthSettings = AuthSettings()
+
+    @model_validator(mode="after")
+    def _no_dev_auth_defaults_outside_local(self) -> Self:
+        # A known JWT secret lets anyone forge a session; known seed passwords open the admin.
+        if self.app_env in _DEV_ENVS:
+            return self
+        dev = AuthSettings()
+        stale = [
+            f"AUTH__{name.upper()}"
+            for name in ("jwt_secret", "seed_buyer_password", "seed_admin_password")
+            if getattr(self.auth, name) == getattr(dev, name)
+        ]
+        if stale:
+            raise ValueError(f"set real values for {', '.join(stale)} (APP_ENV={self.app_env})")
+        return self
 
     @classmethod
     def settings_customise_sources(

@@ -14,9 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.main import create_app
 from app.modules.agent.llm.fake import ScriptedLlm
+from app.modules.agent.models import AgentRun
 from app.modules.agent.router import get_agent_service
 from app.modules.agent.service import AgentService
+from app.modules.auth import repository as users_repo
+from app.modules.auth.deps import current_user
+from app.modules.auth.schemas import UserOut
+from app.modules.auth.seed import BUYER_EMAIL, seed_users
 from app.seed.scenario1 import seed_scenario1
+from app.shared.enums import UserRole
 
 TODAY = date(2026, 10, 14)
 NOW = datetime(2026, 10, 14, 6, 0, tzinfo=UTC)
@@ -32,6 +38,7 @@ ACCEPT_800: dict[str, Any] = {
 async def svc(sessionmaker: async_sessionmaker[AsyncSession]) -> AgentService:
     async with sessionmaker() as s:
         await seed_scenario1(s, today=TODAY, now=NOW)
+        await seed_users(s, get_settings())
     return AgentService(
         sessionmaker,
         ScriptedLlm([ACCEPT_800]),
@@ -42,9 +49,18 @@ async def svc(sessionmaker: async_sessionmaker[AsyncSession]) -> AgentService:
 
 
 @pytest.fixture
-async def client(svc: AgentService) -> AsyncIterator[AsyncClient]:
+async def buyer(sessionmaker: async_sessionmaker[AsyncSession], svc: AgentService) -> UserOut:
+    async with sessionmaker() as s:
+        row = await users_repo.get_by_email(s, BUYER_EMAIL)
+    assert row is not None
+    return UserOut.model_validate(row, from_attributes=True)
+
+
+@pytest.fixture
+async def client(svc: AgentService, buyer: UserOut) -> AsyncIterator[AsyncClient]:
     app = create_app()
     app.dependency_overrides[get_agent_service] = lambda: svc
+    app.dependency_overrides[current_user] = lambda: buyer
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
@@ -69,6 +85,20 @@ async def test_start_poll_then_approve(client: AsyncClient, svc: AgentService) -
     assert done.json()["execution"]["final_status"] == "submitted"
 
 
+async def test_decision_records_who_decided(
+    client: AsyncClient,
+    svc: AgentService,
+    buyer: UserOut,
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    run_id = await _proposed(client, svc)
+    await client.post(f"/agent/runs/{run_id}/decision", json={"action": "approve"})
+    async with sessionmaker() as s:
+        row = await s.get(AgentRun, run_id)
+    assert row is not None
+    assert row.decided_by == buyer.id
+
+
 async def test_second_decision_is_conflict(client: AsyncClient, svc: AgentService) -> None:
     url = f"/agent/runs/{await _proposed(client, svc)}/decision"
     await client.post(url, json={"action": "reject", "reason": "not now"})
@@ -90,6 +120,9 @@ async def test_empty_sku_is_rejected(client: AsyncClient) -> None:
 
 async def test_without_llm_provider_is_unavailable() -> None:
     app = create_app()
+    app.dependency_overrides[current_user] = lambda: UserOut(
+        id="u", name="n", email="e", role=UserRole.BUYER, branch="Mumbai"
+    )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.post("/agent/runs", json={"sku": "COKE-750", "node": "BANDRA"})
     assert r.status_code == 503

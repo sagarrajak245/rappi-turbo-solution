@@ -30,6 +30,16 @@ class NotFound(AppError):
     code = "not_found"
 
 
+class Unauthorized(AppError):
+    status_code = 401
+    code = "unauthorized"
+
+
+class Forbidden(AppError):
+    status_code = 403
+    code = "forbidden"
+
+
 class Conflict(AppError):
     status_code = 409
     code = "conflict"

@@ -1,4 +1,7 @@
-"""HTTP surface of the agent: start a run, poll it, then send the buyer's decision."""
+"""HTTP surface of the agent: start a run, poll it, then send the buyer's decision.
+
+Every route needs a signed-in user; the decision records who made it.
+"""
 
 from typing import Annotated
 
@@ -7,8 +10,9 @@ from fastapi import APIRouter, Depends, Request, status
 from app.modules.agent.llm.base import LlmUnavailable
 from app.modules.agent.schemas import HumanDecision, RunOut, RunRequest
 from app.modules.agent.service import AgentService
+from app.modules.auth.deps import CurrentUser, current_user
 
-router = APIRouter(prefix="/agent", tags=["agent"])
+router = APIRouter(prefix="/agent", tags=["agent"], dependencies=[Depends(current_user)])
 
 
 def get_agent_service(request: Request) -> AgentService:
@@ -33,5 +37,5 @@ async def get_run(run_id: str, svc: Service) -> RunOut:
 
 
 @router.post("/runs/{run_id}/decision")
-async def decide(run_id: str, body: HumanDecision, svc: Service) -> RunOut:
-    return await svc.decide(run_id, body)
+async def decide(run_id: str, body: HumanDecision, svc: Service, user: CurrentUser) -> RunOut:
+    return await svc.decide(run_id, body, user_id=user.id)
