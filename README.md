@@ -8,20 +8,46 @@ Built for the Rappi "AI Purchasing Agent" assignment. **Scenario 1 (Purchase Rec
 is implemented end to end**: backend, agent, mock ERP, feedback loop, learning, UI and evaluation.
 The setting is a Mumbai quick-commerce branch with five dark stores, and money is in INR.
 
+- [Assignment checklist](#assignment-checklist)
 - [What the agent does](#what-the-agent-does)
+- [Agent behaviour: answers to the brief](#agent-behaviour-answers-to-the-brief)
 - [Architecture](#architecture)
 - [Scenario 1 solution](#scenario-1-solution)
 - [How decisions are validated](#how-decisions-are-validated)
 - [Feedback loop: when the ERP disagrees](#feedback-loop-when-the-erp-disagrees)
 - [Learning from the buyer](#learning-from-the-buyer)
 - [Evaluation](#evaluation)
+- [Mock APIs, data and services](#mock-apis-data-and-services)
+- [Other buyer problems the same agent handles](#other-buyer-problems-the-same-agent-handles)
 - [Run it locally](#run-it-locally)
 - [Demo walkthrough](#demo-walkthrough)
 - [Repository layout](#repository-layout)
 - [Design decisions and trade-offs](#design-decisions-and-trade-offs)
 - [What is not built yet](#what-is-not-built-yet)
 
+A plain-language explanation of the problem Scenario 1 solves is in
+[`docs/scenario-1.md`](docs/scenario-1.md#what-we-are-trying-to-do).
+
 ---
+
+## Assignment checklist
+
+| The brief asks for | Where it is |
+|---|---|
+| At least one scenario end to end | Scenario 1, from recommendation to a verified ERP order: [Scenario 1 solution](#scenario-1-solution) |
+| Recommendation not assumed correct | It is recomputed from raw data and judged: [What the agent does](#what-the-agent-does) |
+| Several factors and constraints at once | Budget, storage, shelf life, MOQ and case-pack caps combined (case C10): [The calculation](#the-calculation) |
+| Explain the important factors | Reasons that cite facts, checked by a reviewer LLM; a summary and chart on the review page |
+| What information, tools, data, actions, approval, validation | [Agent behaviour: answers to the brief](#agent-behaviour-answers-to-the-brief) |
+| Validate the result of an action | ERP re-read and compared after draft and after submit: [How decisions are validated](#how-decisions-are-validated) |
+| Handle an outcome different from expected | [Feedback loop: when the ERP disagrees](#feedback-loop-when-the-erp-disagrees) |
+| Test scenarios and evaluation approach | 25 seeded cases, three test layers, evaluation CLI and page: [Evaluation](#evaluation) |
+| Mock APIs, datasets, services | [Mock APIs, data and services](#mock-apis-data-and-services) |
+| README with setup and run instructions | [Run it locally](#run-it-locally) |
+| Architecture diagram | [Architecture](#architecture) |
+| Working demo | Runs locally in a few commands: [Demo walkthrough](#demo-walkthrough) |
+| `.env.example`, no secrets committed | [`.env.example`](.env.example); `.env` is git-ignored |
+| Optional: other buyer problems | [Other buyer problems the same agent handles](#other-buyer-problems-the-same-agent-handles) |
 
 ## What the agent does
 
@@ -51,6 +77,19 @@ The system recommends buying **800 units**. The recommendation may be wrong, so 
 8. **Learns**. A reason the buyer gives when changing or rejecting a proposal becomes a lesson the
    buyer can confirm. Confirmed lessons are shown to the agent on later runs for the same product and
    store.
+
+## Agent behaviour: answers to the brief
+
+| Question in the brief | Answer in this solution |
+|---|---|
+| **What information does the agent need?** | Stock on hand and reserved, 28 days of sales, the 28-day forecast, open POs with ETA and status, supplier terms (lead time, MOQ, case pack, unit price, active or not), the budget left for the category and store, the storage zone's capacity and what other products will occupy at arrival, shelf life, and the buyer's confirmed lessons. |
+| **What tools or APIs does it use?** | Deterministic services: `planning` (load facts, calculate, project stock, build options), `validation` (data quality, limits), `memory` (lessons) and `execution` (ERP actions). The LLM is **given no tools**: code gathers every fact first and passes it as one fact pack, so the model cannot skip a source or call something it should not. |
+| **What data should exist?** | Products, stores, suppliers and their terms, inventory snapshots, sales history, forecasts, open POs, budgets, storage zones and recommendations. The system adds agent runs, LLM call records, lessons, notifications, ERP orders and evaluation results. See [Mock APIs, data and services](#mock-apis-data-and-services). |
+| **How does it interact with them?** | Through a LangGraph graph: load → check data → calculate → recall lessons → decide (LLM) → validate → review (LLM) → propose. After approval, the execution service talks to the ERP with idempotent calls. |
+| **How are decisions made?** | The formulas produce a baseline and the limits. The LLM chooses the verdict and quantity and explains them. The validator accepts the decision or sends it back. Untrustworthy data never reaches the LLM: it ends as INVESTIGATE or ESCALATE directly. |
+| **What actions may the agent perform?** | Read data and propose. Only code, from an approved proposal, may create, submit or cancel an ERP order. Cancelling or amending after submit needs a human. |
+| **When is human approval needed?** | Before every order. Also after a material ERP change (the re-plan goes back to the buyer), when the order differs after submit, and when a run was interrupted during execution. |
+| **How is the result validated?** | Data checks before deciding; the validator after deciding and after any buyer change; an ERP re-read and comparison after draft and after submit. See [How decisions are validated](#how-decisions-are-validated). |
 
 ## Architecture
 
@@ -283,6 +322,47 @@ uv run python -m app.evaluation run --scenario 1 --live --repeat 3  # real model
 The latest offline run on this repo: **25/25 passed, 0 hard-limit violations, escalation rate
 8 %**. In offline mode the LLM is scripted, so this checks the pipeline, validator and execution
 rather than model judgment. The `--live` mode measures the real models.
+
+## Mock APIs, data and services
+
+Everything runs from this repository. The only external services are the LLM providers.
+
+**Mock ERP** (`backend/app/modules/erp_mock`) is a real HTTP API with its own tables:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /mock-erp/purchase-orders` | Create a draft. Requires an `Idempotency-Key`; a replay returns the same order. |
+| `GET /mock-erp/purchase-orders/{erp_number}` | Read an order back for verification |
+| `POST /mock-erp/purchase-orders/{erp_number}/submit` | Submit a draft |
+| `POST /mock-erp/purchase-orders/{erp_number}/cancel` | Cancel an order |
+
+The seed can attach a **surprise** to a product, which the ERP plays back: a price change, a
+case-pack change, a late ETA, a timeout after create, a rejection on submit, or a different quantity
+after submit. These drive the feedback-loop cases F1–F6.
+
+**Agent and app APIs** (all listed at `/docs`): `POST /agent/runs` starts a run,
+`GET /agent/runs/{id}` returns the proposal with its facts and projection, and
+`POST /agent/runs/{id}/decision` records the buyer's approve, modify or reject. Other endpoints
+serve the inbox, POs, dashboard, lessons, notifications (SSE), admin metrics and evaluation.
+
+**Dataset.** `python -m app.seed scenario1` writes a deterministic Mumbai dataset: five dark stores
+(Andheri West, Bandra, Powai, Lower Parel, Thane), Indian FMCG products and suppliers, 28 days of
+sales and forecasts, open POs, budgets and storage zones. Each of the 25 cases is its own
+product × store, built from the case table so that its numbers produce the expected answer.
+
+## Other buyer problems the same agent handles
+
+The brief lists optional buyer problems. These are handled inside the Scenario 1 flow today:
+
+| Problem | How it shows up |
+|---|---|
+| **Open purchase orders** | Open POs count towards stock only if they arrive in time. Overdue POs are excluded and flagged so the buyer chases them (Q4, C10). |
+| **Forecast anomalies** | A forecast more than 25 % away from real sales is flagged, and more than 50 % blocks the order until investigated (Q6). With no forecast, sales are used instead (Q3a). |
+| **Safety stock** | Computed from sales variability for a 95 % service level, not a fixed number. |
+| **Replenishment** | The agent recomputes the need instead of trusting the system's 800 (C2–C4). |
+| **Supplier reliability** | An inactive supplier escalates (Q5). ERP surprises in price, case pack, ETA and quantity are caught by verification (F1–F6). |
+| **Purchasing constraints (Scenario 4)** | Budget, storage, shelf-life, MOQ and case-pack limits lead to a capped or partial order, or to an escalation with pre-checked options (C5–C11). |
+| **Untrusted text** | A supplier note that tries to instruct the agent is treated as data, flagged, and never forwarded to the LLM (Q7). |
 
 ## Run it locally
 
