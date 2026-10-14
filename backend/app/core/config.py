@@ -66,7 +66,13 @@ class DataQualitySettings(BaseModel):
     snapshot_max_age_hours: int = 24
     forecast_sales_gap_warn_pct: float = 0.25
     forecast_sales_gap_block_pct: float = 0.50
-    injection_patterns: list[str] = []
+    # Defaults mirror settings.yaml so a missing file never switches injection detection off.
+    injection_patterns: list[str] = [
+        "ignore (all |any )?(previous|prior) instructions",
+        "you are now",
+        "system prompt",
+        "approve (this|the) order",
+    ]
 
 
 class ErpSettings(BaseModel):
