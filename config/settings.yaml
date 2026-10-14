@@ -43,3 +43,13 @@ erp:
   price_tolerance_pct: 0.02      # draft unit price may differ this much before it is a deviation
   eta_tolerance_days: 1
   max_replans: 1
+
+llm:
+  # Model ids and prices (USD per million tokens) for cost tracking. Keys live in .env.
+  decision: {provider: groq, model: openai/gpt-oss-120b, price_in_per_mtok_usd: 0.15, price_out_per_mtok_usd: 0.60}
+  reviewer: {provider: groq, model: qwen/qwen3.8-27b, price_in_per_mtok_usd: 0.29, price_out_per_mtok_usd: 0.59}
+  fallback: {provider: gemini, model: gemini-2.5-flash, price_in_per_mtok_usd: 0.30, price_out_per_mtok_usd: 2.50}
+  timeout_s: 30
+  max_invalid_retries: 1   # retry once on invalid JSON, then fall back
+  max_review_attempts: 2   # reviewer fails twice -> ESCALATE (R7)
+  max_tool_calls: 4        # read-only investigation calls per decision (D22)
