@@ -34,7 +34,9 @@ export function DecisionPanel({ run, proposal }: { run: Run; proposal: Proposal 
       ),
     onSuccess: (out) => {
       setConfirm(null);
-      toast.success(`Decision recorded: ${out.status.replaceAll("_", " ")}`);
+      // An invalid modify comes back 200, still awaiting approval, with the reason in `error`.
+      if (out.status === "awaiting_approval" && out.error) toast.error(out.error);
+      else toast.success(`Decision recorded: ${out.status.replaceAll("_", " ")}`);
       qc.setQueryData(["run", run.id], out);
       qc.invalidateQueries({ queryKey: ["lessons"] });
       qc.invalidateQueries({ queryKey: ["inbox"] });
@@ -64,6 +66,8 @@ export function DecisionPanel({ run, proposal }: { run: Run; proposal: Proposal 
     );
   }
 
+  // Approving a no-order verdict (reject, investigate) only acknowledges it; no PO is placed.
+  const placesOrder = proposal.valid && proposal.outcome === "PROPOSE" && !!proposal.qty;
   const snap = snapToCasePack(qty, pack);
   const deviates = qty !== proposal.qty;
   const canModify = snap.valid && deviates && reason.trim().length > 0;
@@ -72,11 +76,11 @@ export function DecisionPanel({ run, proposal }: { run: Run; proposal: Proposal 
     <Card>
       <div className="flex flex-wrap gap-3">
         <button
-          disabled={send.isPending || proposal.qty === null}
-          onClick={() => setConfirm({ action: "approve" })}
+          disabled={send.isPending}
+          onClick={() => (placesOrder ? setConfirm({ action: "approve" }) : send.mutate({ action: "approve" }))}
           className="rounded-full bg-[#1F1F1F] px-5 py-2.5 text-sm text-white disabled:opacity-50"
         >
-          Approve {proposal.qty ?? ""}
+          {placesOrder ? `Approve ${proposal.qty}` : "Agree, don't order"}
         </button>
         <button
           onClick={() => setMode(mode === "modify" ? "idle" : "modify")}

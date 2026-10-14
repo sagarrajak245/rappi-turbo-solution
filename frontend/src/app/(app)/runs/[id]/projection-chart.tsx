@@ -40,7 +40,7 @@ export function ProjectionChart({ projection }: { projection: StockProjection })
             dot={false}
           />
           <Line
-            name={`Agent (${projection.agent.qty})`}
+            name={`Agent proposal (${projection.agent.qty})`}
             dataKey="agent"
             stroke="#1F1F1F"
             strokeWidth={2.5}

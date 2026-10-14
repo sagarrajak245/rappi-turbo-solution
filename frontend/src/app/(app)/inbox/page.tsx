@@ -14,6 +14,8 @@ type RunStatus = Schemas["RunStatus"];
 const BUSY: RunStatus[] = ["running", "executing"];
 const STATUSES: RunStatus[] = ["awaiting_approval", "running", "completed", "rejected", "acknowledged", "escalated", "needs_human", "failed"];
 
+const HOLD: RunStatus[] = [...BUSY, "awaiting_approval", "needs_human"];
+
 const isBusy = (r: Row) => !!r.run && BUSY.includes(r.run.status);
 
 export default function InboxPage() {
@@ -52,7 +54,8 @@ export default function InboxPage() {
   });
 
   const runnable = useMemo(
-    () => (rows.data ?? []).filter((r) => !isBusy(r) && r.run?.status !== "awaiting_approval"),
+    // needs_human means the ERP state is unknown: re-running could place a second order
+    () => (rows.data ?? []).filter((r) => !r.run || !HOLD.includes(r.run.status)),
     [rows.data],
   );
 
@@ -141,7 +144,7 @@ export default function InboxPage() {
                     {isBusy(r) ? (
                       <span className="text-neutral-500">Working…</span>
                     ) : (
-                      r.run?.status !== "awaiting_approval" && (
+                      !(r.run && HOLD.includes(r.run.status)) && (
                         <button
                           disabled={start.isPending}
                           onClick={() => start.mutate([r])}
