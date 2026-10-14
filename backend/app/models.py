@@ -1,0 +1,30 @@
+"""Imports every module's ORM models so Base.metadata is complete (Alembic, create_all)."""
+
+from app.core.db import Base
+from app.modules.budget.models import Budget
+from app.modules.catalog.models import Node, Product
+from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpRequest
+from app.modules.inventory.models import DemandForecast, InventorySnapshot, SalesHistory
+from app.modules.purchasing.models import PoLine, PurchaseOrder
+from app.modules.recommendations.models import Recommendation
+from app.modules.storage.models import StorageZone
+from app.modules.suppliers.models import Supplier, SupplierProduct
+
+__all__ = [
+    "Base",
+    "Budget",
+    "DemandForecast",
+    "ErpBehaviour",
+    "ErpPurchaseOrder",
+    "ErpRequest",
+    "InventorySnapshot",
+    "Node",
+    "PoLine",
+    "Product",
+    "PurchaseOrder",
+    "Recommendation",
+    "SalesHistory",
+    "StorageZone",
+    "Supplier",
+    "SupplierProduct",
+]
