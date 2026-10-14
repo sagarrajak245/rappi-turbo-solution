@@ -74,8 +74,8 @@ def test_sales_fallback_when_no_forecast() -> None:
 
 
 def test_inbound_due_after_protection_period_is_ignored() -> None:
-    late = InboundPo(po_number="X", qty=500, eta_offset=12)  # C3 has P = 12; 13 is outside
-    inp = _input("C1").model_copy(update={"inbound": (late.model_copy(update={"eta_offset": 11}),)})
+    late = InboundPo(po_number="X", qty=500, eta_offset=11)  # C1 has P = 10: day 11 is outside
+    inp = _input("C1").model_copy(update={"inbound": (late.model_copy(update={"eta_offset": 10}),)})
     assert calculate(inp, SETTINGS).inventory_position == 310 + 500
     inp = _input("C1").model_copy(update={"inbound": (late,)})
     assert calculate(inp, SETTINGS).inventory_position == 310
