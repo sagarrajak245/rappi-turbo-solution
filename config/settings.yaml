@@ -1,0 +1,45 @@
+# Business parameters for the purchasing agent.
+# Secrets and connection strings live in .env, never here.
+# Environment variables override these values (e.g. PLANNING__SERVICE_LEVEL=0.98).
+
+app:
+  name: rappi-turbo
+  currency: INR
+  branch: Mumbai
+
+database:
+  # Used only when DATABASE_URL is empty.
+  sqlite_path: backend/data/app.db
+
+logging:
+  level: INFO
+  json: true
+
+planning:
+  order_cycle_days: 7            # R in P = L + R
+  service_level: 0.95            # -> z via the table below
+  z_table:                       # service level -> z (no scipy needed)
+    0.90: 1.28
+    0.95: 1.65
+    0.98: 2.05
+    0.99: 2.33
+  sales_window_days: 28          # history used for sigma and the forecast fallback
+  accept_tolerance_pct: 0.10     # |rec - Q| <= max(1 case, 10% of rec) -> ACCEPT
+  max_cover_days: 21             # soft: overstock above this
+  max_deviation_from_rec_pct: 0.50  # soft: larger deviations need a reason
+  shelf_life_safety_days: 1      # sell-by margin before expiry
+
+data_quality:
+  snapshot_max_age_hours: 24     # older -> blocking (INVESTIGATE)
+  forecast_sales_gap_warn_pct: 0.25
+  forecast_sales_gap_block_pct: 0.50   # strictly greater -> blocking
+  injection_patterns:            # supplier/product notes matching these are flagged, never obeyed
+    - "ignore (all |any )?(previous|prior) instructions"
+    - "you are now"
+    - "system prompt"
+    - "approve (this|the) order"
+
+erp:
+  price_tolerance_pct: 0.02      # draft unit price may differ this much before it is a deviation
+  eta_tolerance_days: 1
+  max_replans: 1
