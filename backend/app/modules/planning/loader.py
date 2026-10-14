@@ -1,84 +1,38 @@
 """Load everything the planning core needs for one SKU x node into a PlanningInput.
 
-The one place planning reads other modules' tables. Everything after this is pure.
+The one place planning reads other modules' tables (via the repository). Everything after
+this is pure.
 """
 
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import PlanningSettings
 from app.core.errors import NotFound
-from app.models import (
-    Budget,
-    DemandForecast,
-    InventorySnapshot,
-    Node,
-    PoLine,
-    Product,
-    PurchaseOrder,
-    Recommendation,
-    SalesHistory,
-    StorageZone,
-    Supplier,
-    SupplierProduct,
-)
+from app.models import Node, Product
+from app.modules.planning import repository as repo
 from app.modules.planning.schemas import InboundPo, PlanningInput
-from app.shared.enums import PoStatus
-
-OPEN_PO_STATUSES = (PoStatus.PLACED, PoStatus.CONFIRMED)
 
 
 async def _zone_other_load(
     session: AsyncSession, node: Node, product: Product, today: date, lead: int
 ) -> Decimal:
     """Projected volume of the zone's other SKUs when our order arrives (day `lead`)."""
-    others = (
-        await session.execute(
-            select(InventorySnapshot, Product.unit_volume)
-            .join(Product, InventorySnapshot.product_id == Product.id)
-            .where(
-                InventorySnapshot.node_id == node.id,
-                Product.storage_zone == product.storage_zone,
-                Product.id != product.id,
-            )
-            .order_by(InventorySnapshot.as_of)
-        )
-    ).all()
+    others = await repo.list_zone_other_snapshots(
+        session, node.id, product.storage_zone, product.id
+    )
     latest = {snap.product_id: (snap.on_hand, volume) for snap, volume in others}
     if not latest:
         return Decimal(0)
     arrival = today + timedelta(days=lead)
     ids = list(latest)
-    forecast_rows = (
-        await session.execute(
-            select(DemandForecast.product_id, func.sum(DemandForecast.qty))
-            .where(
-                DemandForecast.node_id == node.id,
-                DemandForecast.product_id.in_(ids),
-                DemandForecast.day > today,
-                DemandForecast.day <= arrival,
-            )
-            .group_by(DemandForecast.product_id)
-        )
-    ).all()
+    forecast_rows = await repo.list_forecast_totals(session, node.id, ids, today, arrival)
     forecast = {pid: qty for pid, qty in forecast_rows}
     inbound: dict[int, int] = defaultdict(int)
-    rows = await session.execute(
-        select(PoLine.product_id, PoLine.qty_ordered - PoLine.qty_received)
-        .join(PurchaseOrder)
-        .where(
-            PurchaseOrder.node_id == node.id,
-            PurchaseOrder.status.in_(OPEN_PO_STATUSES),
-            PoLine.product_id.in_(ids),
-            PoLine.eta >= today,
-            PoLine.eta <= arrival,
-        )
-    )
-    for pid, qty in rows.all():
+    for pid, qty in await repo.list_open_po_qtys(session, node.id, ids, today, arrival):
         inbound[pid] += qty
     total = Decimal(0)
     for pid, (on_hand, volume) in latest.items():
@@ -90,90 +44,28 @@ async def _zone_other_load(
 async def load_planning_input(
     session: AsyncSession, sku: str, node_code: str, today: date, *, settings: PlanningSettings
 ) -> PlanningInput:
-    product = (await session.execute(select(Product).filter_by(sku=sku))).scalar_one_or_none()
-    node = (await session.execute(select(Node).filter_by(code=node_code))).scalar_one_or_none()
+    product = await repo.get_product_by_sku(session, sku)
+    node = await repo.get_node_by_code(session, node_code)
     if product is None or node is None:
         raise NotFound(f"Unknown SKU {sku} or node {node_code}")
-    pair = {"node_id": node.id, "product_id": product.id}
 
-    snap = (
-        await session.execute(
-            select(InventorySnapshot)
-            .filter_by(**pair)
-            .order_by(InventorySnapshot.as_of.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    rec = (
-        await session.execute(
-            select(Recommendation)
-            .filter_by(**pair)
-            .order_by(Recommendation.created_at.desc(), Recommendation.id.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    snap = await repo.get_latest_snapshot(session, node.id, product.id)
+    rec = await repo.get_latest_recommendation(session, node.id, product.id)
     if snap is None or rec is None:
         raise NotFound(f"No stock snapshot or recommendation for {sku} at {node_code}")
 
-    supplier, terms = (
-        await session.execute(
-            select(Supplier, SupplierProduct)
-            .join(SupplierProduct, SupplierProduct.supplier_id == Supplier.id)
-            .where(Supplier.id == rec.supplier_id, SupplierProduct.product_id == product.id)
-        )
-    ).one()
-
-    forecast = (
-        (
-            await session.execute(
-                select(DemandForecast.qty)
-                .filter_by(**pair)
-                .where(DemandForecast.day > today)
-                .order_by(DemandForecast.day)
-            )
-        )
-        .scalars()
-        .all()
+    supplier, terms = await repo.get_supplier_terms(session, rec.supplier_id, product.id)
+    forecast = await repo.list_forecast_qtys_after(session, node.id, product.id, today)
+    sales = await repo.list_sales_qtys(
+        session,
+        node.id,
+        product.id,
+        today - timedelta(days=settings.sales_window_days),
+        today,
     )
-    sales = (
-        (
-            await session.execute(
-                select(SalesHistory.qty)
-                .filter_by(**pair)
-                .where(
-                    SalesHistory.day >= today - timedelta(days=settings.sales_window_days),
-                    SalesHistory.day < today,
-                )
-                .order_by(SalesHistory.day)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    inbound = (
-        await session.execute(
-            select(PurchaseOrder.po_number, PoLine.qty_ordered - PoLine.qty_received, PoLine.eta)
-            .join(PurchaseOrder)
-            .where(
-                PurchaseOrder.node_id == node.id,
-                PurchaseOrder.status.in_(OPEN_PO_STATUSES),
-                PoLine.product_id == product.id,
-            )
-            .order_by(PurchaseOrder.po_number)
-        )
-    ).all()
-    budget = (
-        await session.execute(
-            select(Budget).filter_by(
-                node_id=node.id, category=product.category, period=today.strftime("%Y-%m")
-            )
-        )
-    ).scalar_one_or_none()
-    zone = (
-        await session.execute(
-            select(StorageZone).filter_by(node_id=node.id, zone=product.storage_zone)
-        )
-    ).scalar_one_or_none()
+    inbound = await repo.list_open_inbound(session, node.id, product.id)
+    budget = await repo.get_budget(session, node.id, product.category, today.strftime("%Y-%m"))
+    zone = await repo.get_storage_zone(session, node.id, product.storage_zone)
 
     lead = terms.lead_time_days
     return PlanningInput(
