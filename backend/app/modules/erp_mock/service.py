@@ -8,13 +8,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import Conflict, ErpTimeout, NotFound
-from app.modules.erp_mock import behaviours
-from app.modules.erp_mock.models import ErpBehaviour, ErpPurchaseOrder, ErpRequest
+from app.modules.erp_mock import behaviours, repository
+from app.modules.erp_mock.models import ErpPurchaseOrder, ErpRequest
 from app.modules.erp_mock.schemas import ErpDraftRequest, ErpPurchaseOrderOut
 from app.shared.enums import ErpPoStatus
 from app.shared.money import to_inr
@@ -34,11 +33,6 @@ def request_hash(payload: dict[str, Any]) -> str:
         _canonical(payload), sort_keys=True, separators=(",", ":"), default=lambda o: o.isoformat()
     )
     return hashlib.sha256(body.encode()).hexdigest()
-
-
-async def _ledger(session: AsyncSession, key: str, op: str) -> ErpRequest | None:
-    stmt = select(ErpRequest).where(ErpRequest.idempotency_key == key, ErpRequest.operation == op)
-    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 def _replay(row: ErpRequest, digest: str) -> ErpPurchaseOrderOut:
@@ -66,16 +60,11 @@ def _record(
     return out
 
 
-async def _behaviour(session: AsyncSession, node_code: str, sku: str) -> ErpBehaviour | None:
-    stmt = select(ErpBehaviour).where(ErpBehaviour.node_code == node_code, ErpBehaviour.sku == sku)
-    return (await session.execute(stmt)).scalar_one_or_none()
-
-
 async def create_draft(
     session: AsyncSession, key: str, req: ErpDraftRequest, now: datetime
 ) -> ErpPurchaseOrderOut:
     digest = request_hash({**req.model_dump(), "op": "create"})
-    if (row := await _ledger(session, key, "create")) is not None:
+    if (row := await repository.get_request(session, key, "create")) is not None:
         return _replay(row, digest)
 
     po = ErpPurchaseOrder(
@@ -93,7 +82,9 @@ async def create_draft(
         created_at=now,
         updated_at=now,
     )
-    behaviour = await _behaviour(session, req.node_code, req.sku)  # before add: avoids autoflush
+    behaviour = await repository.get_behaviour(
+        session, req.node_code, req.sku
+    )  # before add: avoids autoflush
     session.add(po)
     timeout = behaviours.apply("create", po, behaviour)
     out = _record(session, key, "create", digest, po, now)
@@ -102,7 +93,7 @@ async def create_draft(
     except IntegrityError:
         # A concurrent request with the same key won the race: return its result.
         await session.rollback()
-        row = await _ledger(session, key, "create")
+        row = await repository.get_request(session, key, "create")
         if row is None:
             raise
         return _replay(row, digest)
@@ -117,8 +108,7 @@ async def get(session: AsyncSession, erp_number: str) -> ErpPurchaseOrderOut:
 
 
 async def _load(session: AsyncSession, erp_number: str) -> ErpPurchaseOrder:
-    stmt = select(ErpPurchaseOrder).where(ErpPurchaseOrder.erp_number == erp_number)
-    po = (await session.execute(stmt)).scalar_one_or_none()
+    po = await repository.get_po(session, erp_number)
     if po is None:
         raise NotFound(f"Purchase order {erp_number} not found", {"erp_number": erp_number})
     return po
@@ -134,7 +124,7 @@ async def _transition(
     now: datetime,
 ) -> ErpPurchaseOrderOut:
     digest = request_hash({"erp_number": erp_number, "op": op})
-    if (row := await _ledger(session, key, op)) is not None:
+    if (row := await repository.get_request(session, key, op)) is not None:
         return _replay(row, digest)
 
     po = await _load(session, erp_number)
@@ -145,13 +135,13 @@ async def _transition(
         )
     po.status = target
     po.updated_at = now
-    behaviours.apply(op, po, await _behaviour(session, po.node_code, po.sku))
+    behaviours.apply(op, po, await repository.get_behaviour(session, po.node_code, po.sku))
     out = _record(session, key, op, digest, po, now)
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        row = await _ledger(session, key, op)
+        row = await repository.get_request(session, key, op)
         if row is None:
             raise
         return _replay(row, digest)
