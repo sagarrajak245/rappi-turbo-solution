@@ -6,30 +6,23 @@ goes back to `decide` with the issues, at most `llm.max_review_attempts` times, 
 Blocking or escalate data never reaches the LLM at all.
 
 Graph nodes reach data only through the planning and validation services, never repositories.
+The graph ends at `propose`; the human gate is the persisted run row (agent/service.py), so a
+run needs no durable checkpointer and nothing before the gate has side effects.
 """
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.modules.agent.llm.base import LlmClient, LlmUnavailable
 from app.modules.agent.prompts import load_prompt
-from app.modules.agent.schemas import (
-    DecisionOut,
-    HumanAction,
-    HumanDecision,
-    ProposalOut,
-    ReviewOut,
-    RunOut,
-)
+from app.modules.agent.schemas import DecisionOut, ProposalOut, ReviewOut
 from app.modules.agent.state import AgentState
 from app.modules.planning import service as planning
 from app.modules.planning.schemas import CalcResult, Flag, PlanningInput
@@ -117,8 +110,13 @@ def _forced_decision(flags: tuple[Flag, ...], calc: CalcResult) -> ProposedDecis
 # ---- graph ------------------------------------------------------------------------------
 
 
+def human_verdict(qty: int, rec_qty: int) -> Verdict:
+    """The verdict a buyer's own quantity implies (0 = reject, rec = accept, else modify)."""
+    return Verdict.REJECT if qty == 0 else Verdict.ACCEPT if qty == rec_qty else Verdict.MODIFY
+
+
 def build_graph(
-    deps: GraphDeps, checkpointer: BaseCheckpointSaver[Any]
+    deps: GraphDeps, checkpointer: BaseCheckpointSaver[Any] | None = None
 ) -> CompiledStateGraph[AgentState, Any, AgentState, AgentState]:
     s = deps.settings
     max_attempts = s.llm.max_review_attempts
@@ -227,64 +225,6 @@ def build_graph(
         )
         return {"proposal": proposal}
 
-    async def human_gate(state: AgentState) -> AgentState:
-        human = HumanDecision.model_validate(interrupt(state["proposal"].model_dump(mode="json")))
-        return {"run": _HUMAN_HANDLERS[human.action](state, human)}
-
-    def _modify(state: AgentState, human: HumanDecision) -> RunOut:
-        p, rec = state["proposal"], state["inp"].rec_qty
-        if human.qty is None:
-            return RunOut(
-                thread_id=p.thread_id,
-                status="invalid_modification",
-                verdict=None,
-                qty=None,
-                issues=["modify needs a quantity"],
-            )
-        verdict = (
-            Verdict.REJECT
-            if human.qty == 0
-            else Verdict.ACCEPT
-            if human.qty == rec
-            else Verdict.MODIFY
-        )
-        v = validation.validate(
-            ProposedDecision(verdict=verdict, qty=human.qty, deviation_reason=human.reason),
-            state["inp"],
-            state["calc"],
-            tuple(state["flags"]),
-            s.planning,
-        )
-        if not v.valid:
-            return RunOut(
-                thread_id=p.thread_id,
-                status="invalid_modification",
-                verdict=verdict,
-                qty=human.qty,
-                issues=validation_feedback(v),
-            )
-        return RunOut(thread_id=p.thread_id, status="modified", verdict=verdict, qty=human.qty)
-
-    def _approve(state: AgentState, human: HumanDecision) -> RunOut:
-        p = state["proposal"]
-        orderable = p.valid and p.outcome is Outcome.PROPOSE and bool(p.qty)
-        status = "approved" if orderable else "acknowledged"
-        return RunOut(thread_id=p.thread_id, status=status, verdict=p.verdict, qty=p.qty)
-
-    def _simple(status: str) -> Callable[[AgentState, HumanDecision], RunOut]:
-        def handler(state: AgentState, human: HumanDecision) -> RunOut:
-            p = state["proposal"]
-            return RunOut(thread_id=p.thread_id, status=status, verdict=p.verdict, qty=None)
-
-        return handler
-
-    _HUMAN_HANDLERS: dict[HumanAction, Callable[[AgentState, HumanDecision], RunOut]] = {
-        HumanAction.APPROVE: _approve,
-        HumanAction.MODIFY: _modify,
-        HumanAction.REJECT: _simple("rejected"),
-        HumanAction.ACKNOWLEDGE: _simple("acknowledged"),
-    }
-
     # ---- routing ----
 
     def after_recall(state: AgentState) -> str:
@@ -318,7 +258,6 @@ def build_graph(
     g.add_node("review", review)
     g.add_node("escalate", escalate)
     g.add_node("propose", propose)
-    g.add_node("human_gate", human_gate)
     g.add_edge(START, "load_context")
     g.add_edge("load_context", "data_quality")
     g.add_edge("data_quality", "compute")
@@ -329,6 +268,5 @@ def build_graph(
     g.add_conditional_edges("validate", after_validate, ["propose", "review", "decide", "escalate"])
     g.add_conditional_edges("review", after_review, ["propose", "decide", "escalate"])
     g.add_edge("escalate", "propose")
-    g.add_edge("propose", "human_gate")
-    g.add_edge("human_gate", END)
+    g.add_edge("propose", END)
     return g.compile(checkpointer=checkpointer)

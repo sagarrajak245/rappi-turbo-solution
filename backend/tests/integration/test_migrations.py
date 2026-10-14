@@ -29,6 +29,8 @@ PURCHASING_TABLES = {
     "erp_purchase_orders",
     "erp_requests",
     "erp_behaviours",
+    "agent_runs",
+    "llm_calls",
 }
 
 

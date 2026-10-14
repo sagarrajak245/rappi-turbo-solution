@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import TypedDict
 
 from app.modules.agent.llm.base import LlmCallRecord
-from app.modules.agent.schemas import DecisionOut, ProposalOut, RunOut
+from app.modules.agent.schemas import DecisionOut, ProposalOut
 from app.modules.planning.schemas import CalcResult, Flag, PlanningInput
 from app.modules.validation.schemas import ProposedDecision, ValidationResult
 
@@ -33,4 +33,3 @@ class AgentState(TypedDict, total=False):
     llm_records: list[LlmCallRecord]
 
     proposal: ProposalOut
-    run: RunOut

@@ -66,3 +66,17 @@ class ErpPoStatus(StrEnum):
     SUBMITTED = "submitted"
     CANCELLED = "cancelled"
     REJECTED = "rejected"
+
+
+class RunStatus(StrEnum):
+    """Lifecycle of one agent run (KB §3.2): decide, wait for the buyer, execute in the ERP."""
+
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    ACKNOWLEDGED = "acknowledged"
+    ESCALATED = "escalated"
+    NEEDS_HUMAN = "needs_human"
+    FAILED = "failed"

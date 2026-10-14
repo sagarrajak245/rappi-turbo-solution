@@ -1,10 +1,12 @@
 """FastAPI application factory. Run with: uvicorn app.main:create_app --factory"""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
 from app.core.db import dispose_engine, get_sessionmaker
@@ -17,20 +19,28 @@ from app.modules.agent.service import AgentService
 from app.modules.erp_mock.router import router as erp_router
 from app.modules.execution.router import router as execution_router
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # One shared HTTP client for every LLM call; the service owns the run checkpointer.
+    # One shared HTTP client for every LLM call; the service owns the background run tasks.
     settings = get_settings()
     async with httpx.AsyncClient() as http:
-        app.state.agent_service = AgentService(
+        svc = AgentService(
             get_sessionmaker(),
             build_llm("decision", settings, http),
             build_llm("reviewer", settings, http),
             settings,
         )
+        try:
+            await svc.recover()  # runs a restart interrupted before they reached the buyer
+        except SQLAlchemyError:  # e.g. migrations not applied yet: serve, but say so
+            logger.exception("could not recover interrupted agent runs")
+        app.state.agent_service = svc
         yield
         app.state.agent_service = None
+        await svc.shutdown()
     await dispose_engine()
 
 
