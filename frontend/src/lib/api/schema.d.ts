@@ -113,7 +113,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Runs */
+        get: operations["list_runs_agent_runs_get"];
         put?: never;
         /** Start Run */
         post: operations["start_run_agent_runs_post"];
@@ -361,6 +362,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recommendations */
+        get: operations["list_recommendations_recommendations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Purchase Orders */
+        get: operations["list_purchase_orders_purchase_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dashboard/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dashboard Summary */
+        get: operations["dashboard_summary_dashboard_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -394,6 +446,15 @@ export interface components {
              * @default 0
              */
             replans_done: number;
+        };
+        /** BudgetBar */
+        BudgetBar: {
+            /** Node */
+            node: string;
+            /** Used Inr */
+            used_inr: string;
+            /** Limit Inr */
+            limit_inr: string;
         };
         /** CalcResult */
         CalcResult: {
@@ -444,6 +505,21 @@ export interface components {
          * @enum {string}
          */
         ConstraintCode: "budget" | "storage" | "shelf_life" | "moq" | "case_pack";
+        /** DashboardSummary */
+        DashboardSummary: {
+            /** Pending Approvals */
+            pending_approvals: number;
+            /** Committed Today Inr */
+            committed_today_inr: string;
+            /** Agreement Pct */
+            agreement_pct: number | null;
+            /** Budgets */
+            budgets: components["schemas"]["BudgetBar"][];
+            /** Storage */
+            storage: components["schemas"]["StorageBar"][];
+            /** Needs Decision */
+            needs_decision: components["schemas"]["RunSummary"][];
+        };
         /** Deviation */
         Deviation: {
             /** Field */
@@ -661,6 +737,32 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * InboxRow
+         * @description One upstream recommendation with the latest agent run for its SKU x node, if any.
+         */
+        InboxRow: {
+            /** Recommendation Id */
+            recommendation_id: number;
+            /** Sku */
+            sku: string;
+            /** Product Name */
+            product_name: string;
+            /** Category */
+            category: string;
+            /** Node */
+            node: string;
+            /** Node Name */
+            node_name: string;
+            /** Rec Qty */
+            rec_qty: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            run?: components["schemas"]["RunSummary"] | null;
+        };
         /** LessonOut */
         LessonOut: {
             /** Id */
@@ -752,6 +854,15 @@ export interface components {
          * @enum {string}
          */
         Outcome: "PROPOSE" | "ESCALATE";
+        /** ProjectionSeries */
+        ProjectionSeries: {
+            /** Qty */
+            qty: number;
+            /** Stock */
+            stock: number[];
+            /** Stockout Day */
+            stockout_day: number | null;
+        };
         /**
          * ProposalOut
          * @description What the buyer sees at the human gate (KB §3.2 node 9).
@@ -815,6 +926,47 @@ export interface components {
              * @default []
              */
             lessons_applied: number[];
+            /**
+             * Facts
+             * @default {}
+             */
+            facts: {
+                [key: string]: unknown;
+            };
+            projection?: components["schemas"]["StockProjection"] | null;
+        };
+        /** PurchaseOrderRow */
+        PurchaseOrderRow: {
+            /** Erp Number */
+            erp_number: string;
+            /** Run Id */
+            run_id: string;
+            /** Sku */
+            sku: string;
+            /** Node */
+            node: string;
+            /** Supplier Code */
+            supplier_code: string;
+            /** Qty */
+            qty: number;
+            /** Unit Price Inr */
+            unit_price_inr: string;
+            /** Total Inr */
+            total_inr: string;
+            /**
+             * Eta
+             * Format: date
+             */
+            eta: string;
+            status: components["schemas"]["ErpPoStatus"];
+            execution_status: components["schemas"]["ExecutionStatus"];
+            /** Decided By */
+            decided_by: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * ResolutionOption
@@ -866,10 +1018,62 @@ export interface components {
          */
         RunStatus: "running" | "awaiting_approval" | "executing" | "completed" | "rejected" | "acknowledged" | "escalated" | "needs_human" | "failed";
         /**
+         * RunSummary
+         * @description One row of a run list: enough to triage it without loading the full proposal.
+         */
+        RunSummary: {
+            /** Id */
+            id: string;
+            /** Sku */
+            sku: string;
+            /** Node */
+            node: string;
+            status: components["schemas"]["RunStatus"];
+            verdict?: components["schemas"]["Verdict"] | null;
+            /** Qty */
+            qty?: number | null;
+            /** Rec Qty */
+            rec_qty?: number | null;
+            outcome?: components["schemas"]["Outcome"] | null;
+            /** Reason */
+            reason?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * Severity
          * @enum {string}
          */
         Severity: "minor" | "material" | "unfixable";
+        /** StockProjection */
+        StockProjection: {
+            no_order: components["schemas"]["ProjectionSeries"];
+            system: components["schemas"]["ProjectionSeries"];
+            agent: components["schemas"]["ProjectionSeries"];
+            /** Storage Ceiling */
+            storage_ceiling: number | null;
+        };
+        /** StorageBar */
+        StorageBar: {
+            /** Node */
+            node: string;
+            /** Used */
+            used: string;
+            /** Capacity */
+            capacity: string;
+        };
         /**
          * UserOut
          * @description The signed-in user as the API shows it: never the password hash.
@@ -1092,6 +1296,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_agent_runs_get: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["RunStatus"] | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummary"][];
                 };
             };
             /** @description Validation Error */
@@ -1510,6 +1746,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recommendations_recommendations_get: {
+        parameters: {
+            query?: {
+                node?: string | null;
+                status?: components["schemas"]["RunStatus"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_purchase_orders_purchase_orders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRow"][];
+                };
+            };
+        };
+    };
+    dashboard_summary_dashboard_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardSummary"];
                 };
             };
         };
