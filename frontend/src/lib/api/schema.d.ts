@@ -338,7 +338,8 @@ export interface paths {
         /** List Runs */
         get: operations["list_runs_evaluation_runs_get"];
         put?: never;
-        post?: never;
+        /** Start Run */
+        post: operations["start_run_evaluation_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1060,6 +1061,19 @@ export interface components {
          * @enum {string}
          */
         Severity: "minor" | "material" | "unfixable";
+        /** StartEvalIn */
+        StartEvalIn: {
+            /**
+             * Live
+             * @default true
+             */
+            live: boolean;
+            /**
+             * Repeat
+             * @default 1
+             */
+            repeat: number;
+        };
         /** StockProjection */
         StockProjection: {
             no_order: components["schemas"]["ProjectionSeries"];
@@ -1719,6 +1733,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvalRunHeader"][];
+                };
+            };
+        };
+    };
+    start_run_evaluation_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartEvalIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalRunHeader"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
