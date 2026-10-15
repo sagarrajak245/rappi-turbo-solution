@@ -126,6 +126,7 @@ async def run_evaluation(
     live: bool = False,
     repeat: int = 1,
     http: httpx.AsyncClient | None = None,
+    run_id: int | None = None,
 ) -> EvalRunOut:
     started = datetime.now(UTC)
     async with work_sm() as session:
@@ -148,14 +149,13 @@ async def run_evaluation(
             results.append(result)
 
     async with store_sm() as session:
-        row = EvalRun(
-            scenario="1",
-            mode="live" if live else "offline",
-            started_at=started,
-            finished_at=datetime.now(UTC),
-            summary=_summary(results, escalated),
-        )
-        session.add(row)
+        # A run the API opened up front (shown as running) is completed in place.
+        row = (await session.get(EvalRun, run_id)) if run_id is not None else None
+        if row is None:
+            row = EvalRun(scenario="1", mode="live" if live else "offline", started_at=started)
+            session.add(row)
+        row.finished_at = datetime.now(UTC)
+        row.summary = _summary(results, escalated)
         await session.flush()
         for r in results:
             r.eval_run_id = row.id
