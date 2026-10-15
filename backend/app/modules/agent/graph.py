@@ -68,7 +68,8 @@ def facts(inp: PlanningInput, calc: CalcResult, flags: tuple[Flag, ...]) -> dict
         "inventory_position": calc.inventory_position,
         "stock_at_arrival": round(calc.stock_at_arrival, 2),
         "cover_days": None if calc.cover_days is None else round(calc.cover_days, 1),
-        "caps": {code.value: cap for code, cap in calc.caps.items()},
+        # Unit counts, not rupees: a bare "caps" key was read as a ₹ budget by the live model.
+        "max_qty_units_by_cap": {code.value: cap for code, cap in calc.caps.items()},
         "moq": inp.moq,
         "case_pack": inp.case_pack,
         "lead_time_days": inp.lead_time_days,
