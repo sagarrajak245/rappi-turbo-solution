@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api, unwrap, type Schemas } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { Card, ErrorState, PageTitle, StatusBadge, VerdictBadge } from "@/components/ui";
+import { decisionFormKey } from "@/lib/decision";
 import { DecisionPanel } from "./decision-panel";
 import { ProjectionChart } from "./projection-chart";
 
@@ -161,7 +162,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
             </Card>
           )}
 
-          {r.status === "awaiting_approval" && <DecisionPanel run={r} proposal={p} />}
+          {r.status === "awaiting_approval" && <DecisionPanel key={decisionFormKey(r)} run={r} proposal={p} />}
           {r.error && r.status === "awaiting_approval" && (
             <p className="text-sm text-[#C2300F]">Last attempt: {r.error}</p>
           )}
