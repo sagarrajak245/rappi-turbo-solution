@@ -88,3 +88,30 @@ async def test_require_role_forbids_a_buyer_and_admits_an_admin(client: AsyncCli
     assert (await client.get("/admin-only")).status_code == 403
     await _login(client, ADMIN_EMAIL, auth.seed_admin_password)
     assert (await client.get("/admin-only")).status_code == 200
+
+
+async def test_reseeding_applies_changed_seed_passwords(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    # Users are created on the first deploy; a later change to AUTH__SEED_*_PASSWORD must take
+    # effect on the next seed, or the new password never works.
+    from app.modules.auth import repository as repo
+    from app.modules.auth.security import verify_password
+
+    first = get_settings()
+    changed = first.model_copy(
+        update={
+            "auth": first.auth.model_copy(
+                update={"seed_buyer_password": "new-buyer-pass", "seed_admin_password": "new-admin"}
+            )
+        }
+    )
+    async with sessionmaker() as s:
+        await seed_users(s, first)
+        report = await seed_users(s, changed)
+        buyer = await repo.get_by_email(s, BUYER_EMAIL)
+        admin = await repo.get_by_email(s, ADMIN_EMAIL)
+    assert buyer is not None and admin is not None
+    assert verify_password("new-buyer-pass", buyer.password_hash)
+    assert verify_password("new-admin", admin.password_hash)
+    assert report["users"] == 0
