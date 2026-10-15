@@ -117,3 +117,19 @@ async def test_list_and_mark_read(sessionmaker: async_sessionmaker[AsyncSession]
         )
         # one user reading a broadcast does not mark it read for anyone else
         assert (await c.get("/notifications")).json()[0]["read_at"] is None
+
+
+async def test_stream_headers_forbid_proxy_compression_and_buffering(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    # A gzip step in the Next.js proxy holds SSE frames until the buffer fills, so the bell never
+    # updated live. no-transform makes compression skip the stream.
+    from types import SimpleNamespace
+
+    from app.modules.notifications.router import stream
+
+    svc = NotificationService(sessionmaker, InMemoryBroadcaster(), clock=lambda: NOW)
+    resp = await stream(SimpleNamespace(), SimpleNamespace(id=1), svc)  # type: ignore[arg-type]
+    assert "no-transform" in resp.headers["cache-control"]
+    assert "no-cache" in resp.headers["cache-control"]
+    assert resp.headers["x-accel-buffering"] == "no"

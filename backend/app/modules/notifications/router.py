@@ -53,7 +53,8 @@ async def stream(request: Request, user: CurrentUser, svc: Service) -> Streaming
         finally:
             svc.broadcaster.unsubscribe(queue)
 
-    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    # no-transform: the Next.js proxy would otherwise gzip the stream and hold frames back.
+    headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
     return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
 
 
