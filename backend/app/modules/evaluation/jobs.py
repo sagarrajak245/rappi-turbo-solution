@@ -88,7 +88,10 @@ class EvalJobs:
                 )
         except Exception as exc:  # any failure must close the run, or the button stays locked
             logger.exception("evaluation run %s failed", run_id)
-            await self._close(run_id, f"{type(exc).__name__}: {exc}")
+            try:
+                await self._close(run_id, f"{type(exc).__name__}: {exc}")
+            except Exception:  # store down too: recover() closes it on the next start
+                logger.exception("could not close evaluation run %s", run_id)
 
     async def _close(self, run_id: int, error: str) -> None:
         async with self._store() as session:
