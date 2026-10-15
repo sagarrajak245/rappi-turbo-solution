@@ -135,7 +135,10 @@ _DEV_ENVS = frozenset({"local", "test"})
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
+    # hide_input_in_errors: a failed check must not print secrets into hosting logs.
+    model_config = SettingsConfigDict(
+        env_nested_delimiter="__", extra="ignore", hide_input_in_errors=True
+    )
 
     app_env: str = "local"
     database_url: str = ""
