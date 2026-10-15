@@ -109,7 +109,8 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
                   <FactRow key={k} label={label} value={String(p.facts[k])} />
                 ))}
               </dl>
-              <Caps caps={p.facts.caps} />
+              {/* Older proposals stored the caps under "caps". */}
+              <Caps caps={p.facts.max_qty_units_by_cap ?? p.facts.caps} />
             </Card>
           </div>
 
