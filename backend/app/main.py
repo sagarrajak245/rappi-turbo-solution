@@ -18,6 +18,7 @@ from app.modules.agent.router import router as agent_router
 from app.modules.agent.service import AgentService
 from app.modules.auth.router import router as auth_router
 from app.modules.erp_mock.router import router as erp_router
+from app.modules.evaluation.jobs import EvalJobs
 from app.modules.evaluation.router import router as evaluation_router
 from app.modules.execution.router import router as execution_router
 from app.modules.memory.router import router as memory_router
@@ -51,8 +52,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         except SQLAlchemyError:  # e.g. migrations not applied yet: serve, but say so
             logger.exception("could not recover interrupted agent runs")
         app.state.agent_service = svc
+        eval_jobs = EvalJobs(get_sessionmaker(), settings, http)
+        try:
+            await eval_jobs.recover()  # evaluation runs a restart left open
+        except SQLAlchemyError:
+            logger.exception("could not close interrupted evaluation runs")
+        app.state.eval_jobs = eval_jobs
         yield
         app.state.agent_service = None
+        await eval_jobs.shutdown()
         await svc.shutdown()
     await dispose_engine()
 

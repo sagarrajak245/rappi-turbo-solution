@@ -6,7 +6,7 @@ from app.modules.evaluation.models import EvalRun
 from app.modules.evaluation.schemas import EvalResultOut, EvalRunHeader, EvalRunOut
 
 
-def _header(row: EvalRun) -> EvalRunHeader:
+def header(row: EvalRun) -> EvalRunHeader:
     return EvalRunHeader(
         id=row.id,
         scenario=row.scenario,
@@ -18,7 +18,7 @@ def _header(row: EvalRun) -> EvalRunHeader:
 
 
 async def list_runs(session: AsyncSession, limit: int = 50) -> list[EvalRunHeader]:
-    return [_header(r) for r in await repo.list_runs(session, limit)]
+    return [header(r) for r in await repo.list_runs(session, limit)]
 
 
 async def get_run(session: AsyncSession, run_id: int) -> EvalRunOut:
@@ -26,4 +26,4 @@ async def get_run(session: AsyncSession, run_id: int) -> EvalRunOut:
     if row is None:
         raise NotFound(f"Unknown evaluation run {run_id}")
     results = [EvalResultOut.model_validate(r) for r in await repo.list_results(session, run_id)]
-    return EvalRunOut(**_header(row).model_dump(), results=results)
+    return EvalRunOut(**header(row).model_dump(), results=results)
