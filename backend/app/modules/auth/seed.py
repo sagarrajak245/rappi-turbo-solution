@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.modules.auth import repository as repo
 from app.modules.auth.models import User
-from app.modules.auth.security import hash_password
+from app.modules.auth.security import hash_password, verify_password
 from app.shared.enums import UserRole
 
 BUYER_EMAIL = "sagar@rappi.test"
@@ -25,18 +25,23 @@ async def seed_users(
     ]
     added = 0
     for name, email, password, role in wanted:
-        if await repo.get_by_email(session, email) is None:
-            session.add(
-                User(
-                    id=uuid.uuid4().hex,
-                    name=name,
-                    email=email,
-                    password_hash=hash_password(password),
-                    role=role,
-                    branch=settings.app.branch,
-                    created_at=created,
-                )
+        existing = await repo.get_by_email(session, email)
+        if existing is not None:
+            # A changed AUTH__SEED_*_PASSWORD takes effect on the next seed.
+            if not verify_password(password, existing.password_hash):
+                existing.password_hash = hash_password(password)
+            continue
+        session.add(
+            User(
+                id=uuid.uuid4().hex,
+                name=name,
+                email=email,
+                password_hash=hash_password(password),
+                role=role,
+                branch=settings.app.branch,
+                created_at=created,
             )
-            added += 1
+        )
+        added += 1
     await session.commit()
     return {"users": added}
